@@ -1,0 +1,48 @@
+:root.dark-theme {
+  color-scheme: dark;
+  --ink: #eeeae2;
+  --muted: #a5a39c;
+  --line: #343a36;
+  --cream: #171b19;
+  --white: #202522;
+  background: #171b19;
+  color: #eeeae2;
+}
+.dark-theme body,.dark-theme .app-shell,.dark-theme .admin-layout { background: #171b19; color: #eeeae2; }
+.dark-theme .auth-page,.dark-theme .details-page { background: #171b19; color: #eeeae2; }
+.dark-theme .auth-bottom,.dark-theme .details-footnote,.dark-theme .details-form label,.dark-theme .details-form label small { color: #aaa9a1; }
+.dark-theme .auth-card input,.dark-theme .details-form input,.dark-theme .details-form select,.dark-theme .details-form textarea { background: #191e1b; border-color: #414842; color: #eeeae2; }
+.dark-theme .sidebar,.dark-theme .admin-sidebar,.dark-theme .main-area,.dark-theme .admin-main,.dark-theme .summary-strip,.dark-theme .allocation-card,.dark-theme .recommendations,.dark-theme .step article,.dark-theme .vendor-modal,.dark-theme .admin-panel,.dark-theme .admin-metric,.dark-theme .recent-vendor,.dark-theme .admin-empty,.dark-theme .record-form,.dark-theme .payment-metrics article,.dark-theme .auth-card,.dark-theme .details-card { background: #202522; border-color: #343a36; color: #eeeae2; }
+.dark-theme .topbar,.dark-theme .admin-topbar,.dark-theme .side-rule,.dark-theme .admin-user,.dark-theme .vendor-modal>header,.dark-theme .vendor-modal>form>footer,.dark-theme .record-form-heading,.dark-theme .record-form-footer { border-color: #343a36; }
+.dark-theme .budget-card,.dark-theme .admin-placeholder { background: linear-gradient(135deg,#142b26,#1d3831); }
+.dark-theme .summary-item b { color: #eeeae2; }
+.dark-theme .summary-item span { color: #aaa9a1; }
+.dark-theme .budget-card>strong { color: #fff; }
+.dark-theme .brand,.dark-theme .nav-item,.dark-theme .allocation-row,.dark-theme .admin-heading h2,.dark-theme .admin-panel-heading h3,.dark-theme .admin-metric strong,.dark-theme .admin-empty b,.dark-theme .contract-title-line h4,.dark-theme .payment-title-line>b,.dark-theme .vendor-title-line h3,.dark-theme .recent-vendor>b,.dark-theme .auth-card h1,.dark-theme .details-card h1 { color: #eeeae2; }
+.dark-theme .nav-item:hover,.dark-theme .nav-item.active,.dark-theme .review-row:hover,.dark-theme .recent-vendor:hover { background: #2b322e; }
+.dark-theme .review-row,.dark-theme .vendor-card,.dark-theme .contract-card,.dark-theme .payment-card,.dark-theme .allocation-row,.dark-theme .record-count { border-color: #343a36; }
+.dark-theme .vendor-toolbar select,.dark-theme .vendor-form-grid input,.dark-theme .vendor-form-grid select,.dark-theme .vendor-form-grid textarea,.dark-theme .record-form-grid input,.dark-theme .record-form-grid select,.dark-theme .record-form-grid textarea,.dark-theme .couple-filter select,.dark-theme .vendor-search input,.dark-theme .auth-card input,.dark-theme .details-form input,.dark-theme .details-form select,.dark-theme .details-form textarea { background: #191e1b; border-color: #414842; color: #eeeae2; }
+.dark-theme .vendor-search,.dark-theme .couple-filter,.dark-theme .download-document,.dark-theme .subtle-action,.dark-theme .action-verify,.dark-theme .action-approve,.dark-theme .modal-close { background: #202522; border-color: #414842; color: #ddd6ca; }
+.dark-theme .contract-parties,.dark-theme .contract-meta,.dark-theme .payment-meta,.dark-theme .admin-heading p,.dark-theme .admin-panel-heading p,.dark-theme .admin-metric>span,.dark-theme .payment-metrics span,.dark-theme .vendor-info>p,.dark-theme .vendor-description,.dark-theme .vendor-contact,.dark-theme .details-intro p,.dark-theme .auth-intro { color: #aaa9a1; }
+.dark-theme .form-error,.dark-theme .admin-alert { background: #422d2a; color: #f2b6a5; }
+.dark-theme .admin-success { background: #263b30; color: #add1b9; }
+.dark-theme .empty-check,.dark-theme .vendor-avatar { background: #2e3731; }
+.dark-theme .step article,.dark-theme .save-banner { color: #eeeae2; }
+.dark-theme .admin-nav-scrim { background: #0009; }
+.admin-shortcuts { display: flex; gap: 8px; flex-shrink: 0; }
+.admin-shortcuts button { display: inline-flex; align-items: center; gap: 6px; height: 35px; border: 1px solid #ece8e1; border-radius: 9px; padding: 0 10px; background: #fffefa; color: #89653f; font: 600 10px 'DM Sans',sans-serif; }
+.allocation-note { margin: 9px 2px 0; color: #92928a; font-size: 9px; }
+.custom-cost-detail { display: block; margin-top: 3px; color: #99948b; font-size: 8px; }
+.admin-menu-button,.admin-nav-scrim { display: none; }
+@media(max-width:700px) {
+  .admin-menu-button { display: grid; flex: 0 0 36px; }
+  .admin-topbar { gap: 8px; }
+  .admin-topbar>div:first-of-type { margin-right: auto; }
+  .admin-sidebar { left: -270px; width: 260px; transition: left .2s; z-index: 31; overflow-y: auto; }
+  .admin-sidebar.open { left: 0; }
+  .admin-nav-scrim { display: block; position: fixed; inset: 0; z-index: 30; border: 0; }
+  .admin-header-actions { gap: 7px; }
+  .admin-header-actions .pill-button { font-size: 0; padding: 0 9px; }
+  .admin-header-actions .pill-button svg { width: 16px; }
+  .admin-shortcuts { flex-wrap: wrap; }
+}
