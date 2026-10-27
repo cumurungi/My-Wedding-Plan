@@ -12,6 +12,7 @@ export const pool = mysql.createPool({
   user: required('MYSQL_USER', 'root'),
   password: required('MYSQL_PASSWORD'),
   database: required('MYSQL_DATABASE', 'my_wedding_plan'),
+  ssl: process.env.NODE_ENV === 'production' ? {} : undefined,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,

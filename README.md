@@ -17,7 +17,7 @@ A wedding-planning platform foundation with a warm, calm dashboard inspired by t
 
 The API listens on port 3001 by default. On startup it creates the users, couple profile, MySQL session, vendor, contract, and payment tables, then adds any missing wedding-details columns to existing profile tables. Couple accounts are always assigned their role by the server; registration cannot grant administrator access. The configured administrator account is created once, if that email does not already exist. Uploaded contracts and payment evidence are stored under `server/data/private-files` and are only served through admin-authenticated API routes. Back up that directory alongside the database.
 
-For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Use a dedicated MySQL user with permissions limited to this database.
+For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Production MySQL connections use TLS, as required by TiDB Cloud Starter. Use a dedicated MySQL user with permissions limited to this database.
 
 ## Implemented scope
 
