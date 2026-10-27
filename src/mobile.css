@@ -1,0 +1,231 @@
+.mobile-nav-scrim {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  html,
+  body,
+  #root {
+    min-width: 320px;
+    width: 100%;
+    overflow-x: clip;
+  }
+
+  .app-shell,
+  .admin-layout {
+    width: 100%;
+    min-height: 100svh;
+  }
+
+  .mobile-nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    border: 0;
+    background: rgb(24 35 30 / 48%);
+  }
+
+  .sidebar {
+    z-index: 20;
+    overflow-y: auto;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .main-area,
+  .admin-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .topbar,
+  .admin-topbar {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .top-actions {
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .language-picker {
+    gap: 4px;
+  }
+
+  .language-picker > span {
+    display: none;
+  }
+
+  .content,
+  .admin-content {
+    width: 100%;
+    min-width: 0;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .couple-content .page-title {
+    flex-wrap: wrap;
+    gap: 9px;
+  }
+
+  .couple-content .page-title > div {
+    min-width: 0;
+  }
+
+  .couple-edit-button {
+    margin-left: auto;
+  }
+
+  .couple-workspace-sections,
+  .couple-budget-layout {
+    min-width: 0;
+  }
+
+  .couple-page-panel,
+  .account-plan-panel,
+  .account-record-panel,
+  .allocation-card,
+  .recommendations {
+    min-width: 0;
+  }
+
+  .admin-topbar {
+    min-height: 68px;
+    height: auto;
+    gap: 8px;
+  }
+
+  .admin-topbar > div:first-of-type {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .admin-topbar h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(14px, 4vw, 18px);
+  }
+
+  .admin-header-actions {
+    flex: 0 0 auto;
+  }
+
+  .admin-heading {
+    min-width: 0;
+  }
+
+  .admin-heading > div:first-child {
+    min-width: 0;
+  }
+
+  .admin-content > *,
+  .admin-panel,
+  .budget-request-panel,
+  .budget-request-detail {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .budget-table-wrap,
+  .budget-request-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .auth-page,
+  .details-page {
+    min-height: 100svh;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .auth-card,
+  .details-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .auth-card {
+    padding: 25px clamp(18px, 6vw, 26px);
+  }
+
+  .auth-card input,
+  .details-form input,
+  .details-form select,
+  .details-form textarea {
+    font-size: 16px;
+  }
+
+  .details-form-grid,
+  .details-form-grid > label {
+    min-width: 0;
+  }
+
+  .details-form-footer .auth-submit {
+    min-height: 46px;
+  }
+}
+
+@media (max-width: 390px) {
+  .topbar {
+    padding-right: 9px;
+    padding-left: 9px;
+  }
+
+  .top-actions {
+    gap: 5px;
+  }
+
+  .top-actions .notification,
+  .top-actions .welcome-user {
+    display: none;
+  }
+
+  .top-actions .pill-button {
+    padding: 9px 10px;
+    font-size: 9px;
+  }
+
+  .content,
+  .admin-content {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .summary-item {
+    gap: 7px;
+  }
+
+  .summary-item b {
+    font-size: 11px;
+  }
+
+  .allocation-row {
+    grid-template-columns: 8px minmax(0, 1fr) minmax(66px, auto) 24px 12px;
+    gap: 5px;
+  }
+
+  .admin-topbar {
+    padding-right: 9px;
+    padding-left: 9px;
+  }
+
+  .admin-header-actions {
+    gap: 5px;
+  }
+
+  .admin-header-actions .pill-button {
+    width: 35px;
+    min-height: 35px;
+    padding: 0;
+  }
+
+  .auth-page {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
