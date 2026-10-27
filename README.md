@@ -19,6 +19,8 @@ The API listens on port 3001 by default. On startup it creates the users, couple
 
 For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Production MySQL connections use TLS, as required by TiDB Cloud Starter. Use a dedicated MySQL user with permissions limited to this database.
 
+The Vercel frontend proxies `/api/*` requests to the Render backend using `vercel.json`. Update that rewrite destination if the Render service URL changes.
+
 ## Implemented scope
 
 - React + Vite couple dashboard and account screens

@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://my-wedding-plan.onrender.com/api/:path*"
+    }
+  ]
+}
