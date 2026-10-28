@@ -813,9 +813,11 @@ app.get('/api/admin/budget-plans', requireAuth, requireAdmin, async (_req, res, 
       p.id AS planId, p.version, p.planned_total_rwf AS plannedTotalRwf, p.is_over_budget AS isOverBudget,
       p.status, p.review_note AS reviewNote, DATE_FORMAT(p.generated_at, '%Y-%m-%d %H:%i') AS generatedAt
       FROM users u INNER JOIN couple_profiles cp ON cp.user_id = u.id
-      LEFT JOIN wedding_plans p ON p.couple_user_id = u.id AND p.version = (
-        SELECT MAX(latest.version) FROM wedding_plans latest WHERE latest.couple_user_id = u.id
-      ) WHERE u.role = 'couple' AND cp.budget_rwf IS NOT NULL AND cp.guest_count IS NOT NULL
+      LEFT JOIN (
+        SELECT couple_user_id, MAX(version) AS version FROM wedding_plans GROUP BY couple_user_id
+      ) latest_plan ON latest_plan.couple_user_id = u.id
+      LEFT JOIN wedding_plans p ON p.couple_user_id = u.id AND p.version = latest_plan.version
+      WHERE u.role = 'couple' AND cp.budget_rwf IS NOT NULL AND cp.guest_count IS NOT NULL
       ORDER BY (p.status = 'proposed') DESC, p.is_over_budget DESC, p.generated_at DESC, u.name`);
     const planIds = rows.map((row) => row.planId).filter((id) => id !== null);
     let allocations: RowDataPacket[] = [];
