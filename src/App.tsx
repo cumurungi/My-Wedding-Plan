@@ -1,17 +1,20 @@
-import { useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useCallback, useEffect, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { Heart, Sparkles, Wallet, Users, MapPin, CalendarDays, ChevronRight, Moon, Bell, Menu, ClipboardCheck, Lightbulb, ShieldCheck, Eye, EyeOff, Download, Share2, LogOut, FileCheck2, FileText, CircleDollarSign, MessageSquare, type LucideIcon } from 'lucide-react';
 import AdminDashboard from './AdminDashboard';
 import WeddingDetailsForm from './WeddingDetails';
 import ContactPage, { ContactDetails } from './ContactPage';
+import PackagePlansPage from './PackagePlansPage';
 import { CoupleChecklistPage, CoupleInspirationPage } from './CouplePages';
 import './dark-theme.css';
 import './budget-workspace.css';
 import './couple-pages.css';
+import './package-plans.css';
 import { hasWeddingBasics, type User, type WeddingDetails, type WeddingProfile } from './wedding';
 import { LanguagePicker, useLanguage } from './i18n';
+import { packageCheckoutClaimStorageKey, type CouplePackageView, type PackageOrderView } from '../shared/package-plans';
 type AuthMode = 'register' | 'login';
 type NavItem = [string, LucideIcon];
-type CouplePage = 'Budget' | 'Checklist' | 'Inspiration' | 'Contracts' | 'Payments' | 'Contact';
+type CouplePage = 'Budget' | 'Packages' | 'Checklist' | 'Inspiration' | 'Contracts' | 'Payments' | 'Contact';
 type CoupleWorkspace = {
   plan: null | { planId: number; version: number; requestedBudgetRwf: number | string; plannedTotalRwf: number | string; isOverBudget: boolean | number; status: 'proposed' | 'approved' | 'rejected'; reviewNote: string | null; allocations: { category: string; percent: number | string; targetAmountRwf: number | string; plannedAmountRwf: number | string; vendorName: string | null; verifiedPriceFromRwf: number | string | null; priceSource: string }[] };
   contracts: { id: number; title: string; amountRwf: number | string; signatureStatus: string; originalFilename: string; contractDate: string | null; vendorName: string; paidRwf: number | string; balanceRwf: number | string }[];
@@ -26,39 +29,77 @@ const money = (value?: number | null) => value ? `${Number(value).toLocaleString
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<WeddingProfile>({});
-  const [view, setView] = useState<'home' | 'auth' | 'details'>('home');
+  const [view, setView] = useState<'home' | 'auth' | 'details' | 'packages'>('home');
   const [authMode, setAuthMode] = useState<AuthMode>('register');
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState('');
   const [detailsError, setDetailsError] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [packageAccess, setPackageAccess] = useState<CouplePackageView | null>(null);
   const [darkTheme, setDarkTheme] = useState(() => localStorage.getItem('my-wedding-plan-theme') === 'dark');
   useEffect(() => {
     document.documentElement.classList.toggle('dark-theme', darkTheme);
     localStorage.setItem('my-wedding-plan-theme', darkTheme ? 'dark' : 'light');
   }, [darkTheme]);
 
+  async function claimPendingCheckout() {
+    const savedCheckout = sessionStorage.getItem(packageCheckoutClaimStorageKey);
+    if (!savedCheckout) return;
+    let checkout: { orderId: number; claimToken: string };
+    try {
+      checkout = JSON.parse(savedCheckout) as { orderId: number; claimToken: string };
+    } catch {
+      sessionStorage.removeItem(packageCheckoutClaimStorageKey);
+      throw new Error('Your saved checkout details are invalid. Please contact the planning team.');
+    }
+    if (!Number.isInteger(checkout.orderId) || typeof checkout.claimToken !== 'string') {
+      sessionStorage.removeItem(packageCheckoutClaimStorageKey);
+      throw new Error('Your saved checkout details are invalid. Please contact the planning team.');
+    }
+    const response = await fetch('/api/couple/package-orders/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(checkout),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not link your payment to this account.');
+    sessionStorage.removeItem(packageCheckoutClaimStorageKey);
+  }
+
   async function load() {
+    let loadedUser: User | null = null;
     try {
       const response = await fetch('/api/auth/me');
       const data = await response.json();
-      setUser(data.user);
-      if (data.user?.role === 'couple') {
+      loadedUser = data.user;
+      setUser(loadedUser);
+      if (loadedUser?.role === 'couple') {
+        setView('packages');
+        await claimPendingCheckout();
+        const packageResponse = await fetch('/api/couple/package');
+        const packageData = await packageResponse.json();
+        if (!packageResponse.ok) throw new Error(packageData.error || 'Could not verify your planning package.');
+        setPackageAccess(packageData);
+        if (!packageData.activePackage) return;
         const p = await fetch('/api/couple/profile');
-        if (p.ok) {
-          const weddingProfile = (await p.json()).profile || {};
-          setProfile(weddingProfile);
-          if (!hasWeddingBasics(weddingProfile)) setView('details');
-        }
+        if (!p.ok) throw new Error('Could not load your wedding profile.');
+        const weddingProfile = (await p.json()).profile || {};
+        setProfile(weddingProfile);
+        setView(hasWeddingBasics(weddingProfile) ? 'home' : 'details');
       }
-    } catch { /* The API can be started independently while the setup is in progress. */ }
-    setBusy(false);
+    } catch (cause) {
+      if (loadedUser?.role === 'couple') {
+        setView('packages');
+        setNotice(cause instanceof Error ? cause.message : 'Could not verify your planning package.');
+      }
+    } finally { setBusy(false); }
   }
   useEffect(() => { load(); }, []);
 
   async function authenticate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setNotice(''); setBusy(true);
+    let authenticatedCouple = false;
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, string>;
     try {
@@ -67,18 +108,45 @@ export default function App() {
       if (!response.ok) throw new Error(data.error || 'Could not complete your request.');
       setUser(data.user);
       if (data.user.role === 'couple') {
-        const profileResponse = await fetch('/api/couple/profile');
-        const weddingProfile = profileResponse.ok ? (await profileResponse.json()).profile || {} : {};
-        setProfile(weddingProfile);
-        setView(hasWeddingBasics(weddingProfile) ? 'home' : 'details');
+        authenticatedCouple = true;
+        setView('packages');
+        await claimPendingCheckout();
+        const packageResponse = await fetch('/api/couple/package');
+        const packageData = await packageResponse.json();
+        if (!packageResponse.ok) throw new Error(packageData.error || 'Could not verify your planning package.');
+        setPackageAccess(packageData);
+        if (packageData.activePackage) {
+          const profileResponse = await fetch('/api/couple/profile');
+          if (!profileResponse.ok) throw new Error('Could not load your wedding profile.');
+          const weddingProfile = (await profileResponse.json()).profile || {};
+          setProfile(weddingProfile);
+          setView(hasWeddingBasics(weddingProfile) ? 'home' : 'details');
+        }
       } else setView('home');
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not complete your request.'); }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not complete your request.');
+      if (authenticatedCouple) setView('packages');
+    }
     setBusy(false);
   }
+
   async function signOut() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    setUser(null); setProfile({}); setView('home');
+    setUser(null); setProfile({}); setPackageAccess(null); setView('home');
   }
+
+  const activatePackage = useCallback(async (activePackage: PackageOrderView) => {
+    setPackageAccess((current) => current ? { ...current, activePackage, pendingOrder: null } : current);
+    try {
+      const response = await fetch('/api/couple/profile');
+      if (!response.ok) throw new Error('Your payment is confirmed, but your wedding profile could not be loaded. Please reload this page.');
+      const weddingProfile = (await response.json()).profile || {};
+      setProfile(weddingProfile);
+      setView(hasWeddingBasics(weddingProfile) ? 'home' : 'details');
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Your package is active. Reload to continue.');
+    }
+  }, []);
 
   async function saveWeddingDetails(details: WeddingDetails) {
     setDetailsError(''); setSavingDetails(true);
@@ -97,13 +165,17 @@ export default function App() {
   if (busy && !user && view === 'home') return <div className="loading"><Heart size={20} /> My Wedding Plan</div>;
   if (view === 'auth') return <AuthScreen mode={authMode} setMode={setAuthMode} onSubmit={authenticate} busy={busy} notice={notice} onBack={() => setView('home')} />;
   if (user?.role === 'admin') return <AdminShell user={user} onSignOut={signOut} darkTheme={darkTheme} onToggleTheme={() => setDarkTheme(!darkTheme)} />;
-  if (view === 'details' && user?.role === 'couple') return <WeddingDetailsForm user={user} profile={profile} busy={savingDetails} error={detailsError} onSave={saveWeddingDetails} />;
-  return <CoupleShell user={user} profile={profile} mobileNav={mobileNav} setMobileNav={setMobileNav} onSignOut={signOut} setNotice={setNotice} notice={notice} onEditDetails={() => setView('details')} onAuth={(mode) => { setAuthMode(mode); setView('auth'); setNotice(''); }} darkTheme={darkTheme} onToggleTheme={() => setDarkTheme(!darkTheme)} />;
+  if (view === 'details' && user?.role === 'couple' && packageAccess?.activePackage) return <WeddingDetailsForm user={user} profile={profile} busy={savingDetails} error={detailsError} onSave={saveWeddingDetails} />;
+  const initialPage: CouplePage = view === 'packages' || (view === 'details' && !packageAccess?.activePackage) ? 'Packages' : 'Budget';
+  return <CoupleShell user={user} profile={profile} packageAccess={packageAccess} initialPage={initialPage} onPackagePaid={activatePackage} mobileNav={mobileNav} setMobileNav={setMobileNav} onSignOut={signOut} setNotice={setNotice} notice={notice} onEditDetails={() => setView('details')} onAuth={(mode) => { setAuthMode(mode); setView('auth'); setNotice(''); }} darkTheme={darkTheme} onToggleTheme={() => setDarkTheme(!darkTheme)} />;
 }
 
 type CoupleShellProps = {
   user: User | null;
   profile: WeddingProfile;
+  packageAccess: CouplePackageView | null;
+  initialPage: CouplePage;
+  onPackagePaid: (activePackage: PackageOrderView) => void;
   mobileNav: boolean;
   setMobileNav: Dispatch<SetStateAction<boolean>>;
   onSignOut: () => Promise<void>;
@@ -115,9 +187,9 @@ type CoupleShellProps = {
   onToggleTheme: () => void;
 };
 
-function CoupleShell({ user, profile, mobileNav, setMobileNav, onSignOut, setNotice, notice, onEditDetails, onAuth, darkTheme, onToggleTheme }: CoupleShellProps) {
+function CoupleShell({ user, profile, packageAccess, initialPage, onPackagePaid, mobileNav, setMobileNav, onSignOut, setNotice, notice, onEditDetails, onAuth, darkTheme, onToggleTheme }: CoupleShellProps) {
   const { t } = useLanguage();
-  const [activePage, setActivePage] = useState<CouplePage>('Budget');
+  const [activePage, setActivePage] = useState<CouplePage>(initialPage);
   const [workspace, setWorkspace] = useState<CoupleWorkspace | null>(null);
   const [vendorRecommendations, setVendorRecommendations] = useState<CoupleVendorRecommendation[]>([]);
   useEffect(() => {
@@ -125,8 +197,10 @@ function CoupleShell({ user, profile, mobileNav, setMobileNav, onSignOut, setNot
     void fetch('/api/couple/workspace').then((response) => response.ok ? response.json() : null).then((data) => setWorkspace(data)).catch(() => setWorkspace(null));
     void fetch('/api/couple/vendor-recommendations').then((response) => response.ok ? response.json() : null).then((data) => setVendorRecommendations(data?.recommendations ?? [])).catch(() => setVendorRecommendations([]));
   }, [user?.id, profile.vendorNeeds?.join('|')]);
-  const nav: NavItem[] = [['Budget', Wallet], ['Contact', MessageSquare], ['Checklist', ClipboardCheck], ['Inspiration', Lightbulb], ['Contracts', FileText], ['Payments', CircleDollarSign]];
-  const pageDescription: Record<CouplePage, string> = { Budget: 'See your budget, selected services, and planning proposal.', Checklist: 'See your requested vendors and the progress your planning team has marked.', Inspiration: 'Explore ideas and wedding inspiration shared with you.', Contracts: 'Review vendor contracts shared with your account.', Payments: 'Track payments recorded against your vendor contracts.', Contact: 'Send a message to our wedding planning team.' };
+  const nav: NavItem[] = user && !packageAccess?.activePackage
+    ? [['Packages', Heart], ['Contact', MessageSquare]]
+    : [['Budget', Wallet], ['Packages', Heart], ['Contact', MessageSquare], ['Checklist', ClipboardCheck], ['Inspiration', Lightbulb], ['Contracts', FileText], ['Payments', CircleDollarSign]];
+  const pageDescription: Record<CouplePage, string> = { Budget: 'See your budget, selected services, and planning proposal.', Packages: 'Choose or review your paid wedding planning package.', Checklist: 'See your requested vendors and the progress your planning team has marked.', Inspiration: 'Explore ideas and wedding inspiration shared with you.', Contracts: 'Review vendor contracts shared with your account.', Payments: 'Track payments recorded against your vendor contracts.', Contact: 'Send a message to our wedding planning team.' };
   function savePlan() {
     const lines = ['MY WEDDING PLAN', '', `Couple: ${user?.name ?? ''}`, `Budget: ${money(profile.budgetRwf)}`, `Guests: ${profile.guestCount ?? 'Not set'}`, `Wedding date: ${profile.weddingDate ?? 'Not set'}`, `Location: ${profile.location ?? 'Not set'}`, `Celebration format: ${profile.weddingFormat ?? 'Not set'}`, '', 'SERVICES NEEDED', ...(profile.vendorNeeds?.length ? profile.vendorNeeds.map((need) => { const matched = vendorRecommendations.filter((item) => item.need === need && item.vendor); return `• ${need}${matched.length ? ` — ${matched.map((item) => item.vendor!.businessName).join(', ')}` : ''}`; }) : ['No specific services selected'])];
     const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
@@ -152,15 +226,16 @@ function CoupleShell({ user, profile, mobileNav, setMobileNav, onSignOut, setNot
     <main className="main-area">
       <header className="topbar"><button className="icon-button menu-button" aria-label={mobileNav ? 'Close menu' : 'Open menu'} aria-controls="couple-navigation" aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}><Menu size={19} /></button><div className="top-actions"><LanguagePicker />{user ? <><span className="welcome-user">{t('Hello')}, {user.name.split(' ')[0]}</span><button className="pill-button" onClick={onEditDetails}>{t('Edit details')}</button></> : <><button className="text-button" onClick={() => onAuth('login')}>{t('Sign in')}</button><button className="pill-button" onClick={() => onAuth('register')}>{t('Create free account')}</button></>}<button className="icon-button" aria-label={darkTheme ? 'Switch to light theme' : 'Switch to dark theme'} onClick={onToggleTheme}>{darkTheme ? <Sparkles size={17} /> : <Moon size={17} />}</button><button className="icon-button notification" aria-label="Notifications"><Bell size={17} /></button>{user ? <button className="avatar" title="Sign out" onClick={onSignOut}>{user.name.slice(0, 1).toUpperCase()}</button> : <span className="avatar avatar-guest"><Heart size={16} /></span>}</div></header>
       <div className={`content ${user ? 'couple-content' : ''}`}>
-        <div className="page-title"><Sparkles size={19} /><div><h1>{activePage === 'Contact' ? t('Contact us') : user ? t(activePage) : t('Your wedding plan overview')}</h1><p>{activePage === 'Contact' ? t(pageDescription.Contact) : user ? t(pageDescription[activePage]) : t('Sign in to view your wedding details.')}</p></div>{user && <button className="text-button couple-edit-button" onClick={onEditDetails}>{t('Edit wedding details')}</button>}</div>
+        <div className="page-title"><Sparkles size={19} /><div><h1>{activePage === 'Contact' ? t('Contact us') : activePage === 'Packages' ? 'Planning packages' : user ? t(activePage) : t('Your wedding plan overview')}</h1><p>{activePage === 'Contact' ? t(pageDescription.Contact) : activePage === 'Packages' ? t(pageDescription.Packages) : user ? t(pageDescription[activePage]) : t('Sign in to view your wedding details.')}</p></div>{user && activePage !== 'Packages' && <button className="text-button couple-edit-button" onClick={onEditDetails}>{t('Edit wedding details')}</button>}</div>
         {activePage === 'Contact' && <ContactPage user={user} />}
+        {activePage === 'Packages' && <PackagePlansPage user={user} onAuth={onAuth} onPaid={onPackagePaid} />}
         {user && <>
           {activePage === 'Budget' && <><section className="summary-strip"><Summary Icon={Wallet} label={t('Wedding budget')} value={money(profile.budgetRwf)} /><Summary Icon={Users} label={t('Guests')} value={profile.guestCount ? `${profile.guestCount} people` : 'Your guest count'} /><Summary Icon={MapPin} label={t('Location')} value={profile.location || 'Your chosen location'} /><Summary Icon={CalendarDays} label={t('Wedding date')} value={profile.weddingDate ? new Date(`${profile.weddingDate}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Your chosen date'} /></section><div className="couple-budget-layout"><section className="budget-card"><span className="eyebrow light">{t('Your total budget')}</span><strong>{money(profile.budgetRwf)}</strong><div className="donut"><div className="donut-inner"><b>{workspace?.plan && profile.budgetStatus !== 'pending' ? `${Math.min(100, Math.round(Number(workspace.plan.plannedTotalRwf) / Number(profile.budgetRwf || 1) * 100))}%` : '?'}</b><span>{t(workspace?.plan && profile.budgetStatus !== 'pending' ? 'Plan estimate' : 'Awaiting plan')}</span></div></div><button className="budget-adjust" onClick={onEditDetails}>{t('Edit wedding details')} <span>?</span></button></section>{workspace?.plan && profile.budgetStatus !== 'pending' && <IllustrativeBudgetPlan profile={profile} user={user} recommendations={vendorRecommendations} plan={workspace.plan} />}</div><CoupleWorkspaceSections workspace={workspace} page="Budget" budgetStatus={profile.budgetStatus} /></>}
           {activePage === 'Checklist' && <CoupleChecklistPage />}
           {activePage === 'Inspiration' && <CoupleInspirationPage />}
           {(activePage === 'Contracts' || activePage === 'Payments') && <CoupleWorkspaceSections workspace={workspace} page={activePage} />}
         </>}
-        {!user && activePage !== 'Contact' && <GuestWorkspace onAuth={onAuth} onContact={() => { setActivePage('Contact'); setMobileNav(false); }} />}
+        {!user && activePage !== 'Contact' && activePage !== 'Packages' && <GuestWorkspace onAuth={onAuth} onContact={() => { setActivePage('Contact'); setMobileNav(false); }} />}
         <footer>{t('Thoughtfully made for your day')} <Heart size={12} /></footer>
         {notice && <div className="toast" onClick={() => {}}>{notice}<button onClick={() => setNotice('')}>×</button></div>}
       </div>

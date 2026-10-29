@@ -19,6 +19,8 @@ The API listens on port 3001 by default. On startup it creates missing applicati
 
 For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Configure `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` for the MySQL-compatible production database. Production connections use TLS, as required by TiDB Cloud Starter. Use a dedicated database user with permissions limited to this application database.
 
+The one-time wedding-planning packages support guest checkout with MTN Mobile Money Collection or manual bank transfer. After an MTN payment is confirmed, the client is sent to sign in or create an account; the checkout is securely linked to that account before the wedding-details form is shown. Bank transfer clients submit their receipt reference, then sign in or create an account; the package stays locked until an administrator verifies the transfer in **Package payments**. Configure the `MTN_MOMO_*` values and `BANK_TRANSFER_BANK_NAME`, `BANK_TRANSFER_ACCOUNT_NAME`, `BANK_TRANSFER_ACCOUNT_NUMBER`, and optional `BANK_TRANSFER_BRANCH` as private environment variables on the backend host (for example, Render), never in Vercel frontend variables or source control. Use MTN's sandbox credentials and `sandbox` target to test first; use `mtnrwanda` and production credentials only after the MTN merchant account is approved. A method without its required configuration is not offered for checkout.
+
 The Vercel frontend proxies `/api/*` requests to the Render backend using `vercel.json`. Update that rewrite destination if the Render service URL changes.
 
 ## Implemented scope
@@ -31,6 +33,7 @@ The Vercel frontend proxies `/api/*` requests to the Render backend using `verce
 - Admin workspace shell with the requested planning areas
 - Couple wedding-details onboarding and profile editing, with validated, persistent budget, guest count, date, location, style, and special requirements
 - Couple contact phone collection (optional) and a public Contact Us form with an administrator inbox
+- Paid one-time Basic, Standard, and Premium planning packages, with MTN Mobile Money checkout and payment-confirmed client access
 - Budget request status flow: new or updated budget details are pending, generating a proposal moves the request to review, and admin approval or revision requests update its status
 - Live admin overview metrics and an admin-only vendor directory with search, vendor details, verification, pricing approval, and active/inactive status
 - Admin contract register: upload a vendor contract PDF for a couple, search or filter by couple, see vendor and payment balance details, download the private file, and update pending/partially signed/fully signed status

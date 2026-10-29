@@ -105,6 +105,30 @@ export async function initializeDatabase(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
   await pool.execute(`
+    CREATE TABLE IF NOT EXISTS couple_package_orders (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      couple_user_id BIGINT UNSIGNED NULL,
+      package_code ENUM('basic','standard','premium') NOT NULL,
+      amount_rwf BIGINT UNSIGNED NOT NULL,
+      payment_method ENUM('mtn_momo','bank_transfer') NOT NULL,
+      payer_msisdn VARCHAR(20) NULL,
+      payer_reference VARCHAR(120) NULL,
+      claim_secret_hash CHAR(64) NULL,
+      provider_reference CHAR(36) NOT NULL UNIQUE,
+      status ENUM('pending','successful','failed') NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      paid_at TIMESTAMP NULL,
+      INDEX idx_package_orders_couple_status (couple_user_id, status, created_at),
+      CONSTRAINT fk_package_orders_user FOREIGN KEY (couple_user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+  await ensurePackageOrderColumn('payment_method', "ENUM('mtn_momo','bank_transfer') NOT NULL DEFAULT 'mtn_momo'");
+  await ensurePackageOrderColumn('payer_reference', 'VARCHAR(120) NULL');
+  await ensurePackageOrderColumn('payer_msisdn', 'VARCHAR(20) NULL');
+  await ensurePackageOrderColumn('claim_secret_hash', 'CHAR(64) NULL');
+  await ensurePackageOrderCoupleNullable();
+  await ensurePackageOrderReferenceIndex();
+  await pool.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
       session_id VARCHAR(128) NOT NULL PRIMARY KEY,
       expires_at DATETIME(3) NOT NULL,
@@ -400,4 +424,33 @@ async function ensureInspirationColumn(name: 'image_key' | 'image_mime_type' | '
     ['inspiration_items', name],
   );
   if (rows.length === 0) await pool.execute(`ALTER TABLE inspiration_items ADD COLUMN ${name} ${definition}`);
+}
+
+async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_reference' | 'payer_msisdn' | 'claim_secret_hash', definition: string): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT COLUMN_NAME, IS_NULLABLE AS isNullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+    ['couple_package_orders', name],
+  );
+  if (rows.length === 0) await pool.execute(`ALTER TABLE couple_package_orders ADD COLUMN ${name} ${definition}`);
+  else if (name === 'payer_msisdn' && rows[0].isNullable !== 'YES') {
+    await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
+  }
+}
+
+async function ensurePackageOrderCoupleNullable(): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT IS_NULLABLE AS isNullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'couple_package_orders' AND COLUMN_NAME = 'couple_user_id'",
+  );
+  if (rows.length && rows[0].isNullable !== 'YES') {
+    await pool.execute('ALTER TABLE couple_package_orders MODIFY COLUMN couple_user_id BIGINT UNSIGNED NULL');
+  }
+}
+
+async function ensurePackageOrderReferenceIndex(): Promise<void> {
+  const [rows] = await pool.query<RowDataPacket[]>(
+    "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'couple_package_orders' AND INDEX_NAME = 'uq_package_payer_reference'",
+  );
+  if (rows.length === 0) {
+    await pool.execute('CREATE UNIQUE INDEX uq_package_payer_reference ON couple_package_orders (payer_reference)');
+  }
 }

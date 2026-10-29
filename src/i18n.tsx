@@ -5,11 +5,12 @@ const translations: Record<Language, Record<string, string>> = {
   en: {},
   fr: {
     'Language': 'Langue', 'English': 'Anglais', 'French': 'Français', 'Kinyarwanda': 'Kinyarwanda',
-    'Budget': 'Budget', 'Checklist': 'Liste de tâches', 'Inspiration': 'Inspiration', 'Payments': 'Paiements', 'Contact': 'Contact',
+    'Budget': 'Budget', 'Packages': 'Forfaits', 'Checklist': 'Liste de tâches', 'Inspiration': 'Inspiration', 'Payments': 'Paiements', 'Contact': 'Contact',
     'Save plan': 'Enregistrer le plan', 'Share plan': 'Partager le plan', 'Sign out': 'Se déconnecter', 'Wedding account': 'Compte mariage',
     'Sign in': 'Se connecter', 'Create an account': 'Créer un compte', 'Create free account': 'Créer un compte gratuit', 'Edit details': 'Modifier les détails', 'Edit wedding details': 'Modifier les détails du mariage',
     'Your wedding plan overview': 'Aperçu de votre plan de mariage', 'Sign in to view your wedding details.': 'Connectez-vous pour voir les détails de votre mariage.',
     'See your budget, selected services, and planning proposal.': 'Consultez votre budget, les services choisis et la proposition de planification.',
+    'Choose or review your paid wedding planning package.': 'Choisissez ou consultez votre forfait de planification de mariage.',
     'See your requested vendors and the progress your planning team has marked.': 'Consultez les prestataires demandés et l’avancement indiqué par votre équipe.',
     'Explore ideas and wedding inspiration shared with you.': 'Découvrez les idées et inspirations de mariage partagées avec vous.',
     'Review vendor contracts shared with your account.': 'Consultez les contrats des prestataires partagés avec votre compte.',
@@ -59,7 +60,8 @@ const translations: Record<Language, Record<string, string>> = {
   },
   rw: {
     'Language': 'Ururimi', 'English': 'Icyongereza', 'French': 'Igifaransa', 'Kinyarwanda': 'Ikinyarwanda',
-    'Budget': 'Ingengo y’imari', 'Checklist': 'Urutonde rw’imirimo', 'Inspiration': 'Ibitekerezo', 'Contracts': 'Amasezerano', 'Payments': 'Kwishyura', 'Contact': 'Twandikire',
+    'Budget': 'Ingengo y’imari', 'Packages': 'Amahitamo ya serivisi', 'Checklist': 'Urutonde rw’imirimo', 'Inspiration': 'Ibitekerezo', 'Contracts': 'Amasezerano', 'Payments': 'Kwishyura', 'Contact': 'Twandikire',
+    'Choose or review your paid wedding planning package.': 'Hitamo cyangwa urebe serivisi yo gutegura ubukwe wishyuye.',
     'Save plan': 'Bika gahunda', 'Share plan': 'Sangiza gahunda', 'Sign out': 'Sohoka', 'Wedding account': 'Konti y’ubukwe',
     'Sign in': 'Injira', 'Create an account': 'Fungura konti', 'Create free account': 'Fungura konti ku buntu', 'Edit details': 'Hindura amakuru', 'Edit wedding details': 'Hindura amakuru y’ubukwe',
     'Your wedding plan overview': 'Incamake ya gahunda y’ubukwe bwawe', 'Sign in to view your wedding details.': 'Injira urebe amakuru y’ubukwe bwawe.',

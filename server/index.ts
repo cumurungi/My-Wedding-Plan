@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express, { type ErrorRequestHandler, type NextFunction, type Request, type Response } from 'express';
 import session from 'express-session';
@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { initializeDatabase, pool, type UserRow, type VendorRow } from './db.js';
 import { MySQLSessionStore } from './session-store.js';
 import { budgetCategories, generateAllocations } from './budget-planner.js';
+import { getPackagePlan, packagePlans } from '../shared/package-plans.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -75,6 +76,19 @@ const contactMessageSchema = z.object({
   phone: z.string().trim().max(40).default(''),
   message: z.string().trim().min(10).max(5000),
 });
+const packageOrderSchema = z.object({
+  packageCode: z.enum(['basic', 'standard', 'premium']),
+  paymentMethod: z.enum(['mtn_momo', 'bank_transfer']),
+  phone: z.string().trim().max(20).optional(),
+});
+const publicPackageOrderSchema = z.object({
+  packageCode: z.enum(['basic', 'standard', 'premium']),
+  paymentMethod: z.enum(['mtn_momo', 'bank_transfer']),
+  phone: z.string().trim().max(20).optional(),
+});
+const bankTransferReferenceSchema = z.object({ reference: z.string().trim().min(3).max(120) });
+const packageOrderReviewSchema = z.object({ status: z.enum(['successful', 'failed']) });
+const packageOrderClaimSchema = z.object({ orderId: z.number().int().positive(), claimToken: z.string().length(64) });
 const contactMessageStatusSchema = z.object({ status: z.enum(['new', 'handled']) });
 function parseVendorNeeds(value: string | null): string[] {
   if (!value) return [];
@@ -426,7 +440,536 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+function requireCouple(req: Request, res: Response, next: NextFunction): void {
+  if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
+  next();
+}
+
+async function requireActivePackage(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const coupleUserId = req.user?.role === 'couple' ? req.user.id : null;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  try {
+    const [orders] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM couple_package_orders WHERE couple_user_id = ? AND status = 'successful' LIMIT 1",
+      [coupleUserId],
+    );
+    if (!orders.length) { res.status(402).json({ error: 'Choose and pay for a planning package to access these services.' }); return; }
+    next();
+  } catch (error) { next(error); }
+}
+
+type MomoConfiguration = {
+  baseUrl: string;
+  targetEnvironment: 'sandbox' | 'mtnrwanda';
+  subscriptionKey: string;
+  apiUser: string;
+  apiKey: string;
+};
+
+function getMomoConfiguration(): MomoConfiguration | null {
+  const targetEnvironment = process.env.MTN_MOMO_TARGET_ENVIRONMENT;
+  const subscriptionKey = process.env.MTN_MOMO_SUBSCRIPTION_KEY;
+  const apiUser = process.env.MTN_MOMO_API_USER;
+  const apiKey = process.env.MTN_MOMO_API_KEY;
+  if (!subscriptionKey || !apiUser || !apiKey || (targetEnvironment !== 'sandbox' && targetEnvironment !== 'mtnrwanda')) return null;
+  return {
+    baseUrl: targetEnvironment === 'sandbox' ? 'https://sandbox.momodeveloper.mtn.com' : 'https://momodeveloper.mtn.com',
+    targetEnvironment,
+    subscriptionKey,
+    apiUser,
+    apiKey,
+  };
+}
+
+function getBankTransferDetails() {
+  const bankName = process.env.BANK_TRANSFER_BANK_NAME?.trim();
+  const accountName = process.env.BANK_TRANSFER_ACCOUNT_NAME?.trim();
+  const accountNumber = process.env.BANK_TRANSFER_ACCOUNT_NUMBER?.trim();
+  if (!bankName || !accountName || !accountNumber) return null;
+  return {
+    bankName,
+    accountName,
+    accountNumber,
+    branch: process.env.BANK_TRANSFER_BRANCH?.trim() || null,
+  };
+}
+
+async function getMomoAccessToken(config: MomoConfiguration): Promise<string> {
+  const response = await fetch(`${config.baseUrl}/collection/token/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${config.apiUser}:${config.apiKey}`).toString('base64')}`,
+      'Ocp-Apim-Subscription-Key': config.subscriptionKey,
+      'X-Target-Environment': config.targetEnvironment,
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`MTN MoMo token request failed (${response.status}).`);
+  const data = await response.json() as { access_token?: string };
+  if (!data.access_token) throw new Error('MTN MoMo did not return an access token.');
+  return data.access_token;
+}
+
+function normalizeRwandaMsisdn(phone: string): string | null {
+  const digits = phone.replace(/[\s()+-]/g, '');
+  const normalized = digits.startsWith('0') ? `250${digits.slice(1)}` : digits.startsWith('7') ? `250${digits}` : digits;
+  return /^2507\d{8}$/.test(normalized) ? normalized : null;
+}
+
+async function getPackageOrderStatus(config: MomoConfiguration, reference: string): Promise<'pending' | 'successful' | 'failed'> {
+  const token = await getMomoAccessToken(config);
+  const response = await fetch(`${config.baseUrl}/collection/v1_0/requesttopay/${encodeURIComponent(reference)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Ocp-Apim-Subscription-Key': config.subscriptionKey,
+      'X-Target-Environment': config.targetEnvironment,
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`MTN MoMo payment status request failed (${response.status}).`);
+  const data = await response.json() as { status?: string };
+  if (data.status === 'SUCCESSFUL') return 'successful';
+  if (data.status === 'FAILED') return 'failed';
+  return 'pending';
+}
+
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/package-checkout', (_req, res) => {
+  res.json({ plans: packagePlans, paymentMethods: { mtnMomo: Boolean(getMomoConfiguration()), bankTransfer: getBankTransferDetails() } });
+});
+
+app.post('/api/package-checkout', async (req, res, next) => {
+  const parsed = publicPackageOrderSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your package and payment phone number.' }); return; }
+  const config = parsed.data.paymentMethod === 'mtn_momo' ? getMomoConfiguration() : null;
+  const bankTransferDetails = parsed.data.paymentMethod === 'bank_transfer' ? getBankTransferDetails() : null;
+  if (parsed.data.paymentMethod === 'mtn_momo' && !config) {
+    res.status(503).json({ error: 'MTN Mobile Money checkout is not configured yet.' });
+    return;
+  }
+  if (parsed.data.paymentMethod === 'bank_transfer' && !bankTransferDetails) {
+    res.status(503).json({ error: 'Bank transfer is not configured yet.' });
+    return;
+  }
+  const phone = parsed.data.paymentMethod === 'mtn_momo' ? normalizeRwandaMsisdn(parsed.data.phone ?? '') : null;
+  if (parsed.data.paymentMethod === 'mtn_momo' && !phone) {
+    res.status(400).json({ error: 'Enter a valid Rwanda MTN number, for example 0788 123 456.' });
+    return;
+  }
+  const plan = getPackagePlan(parsed.data.packageCode);
+  if (!plan) { res.status(400).json({ error: 'Choose a valid package.' }); return; }
+  const providerReference = randomUUID();
+  const claimToken = randomBytes(32).toString('hex');
+  const claimSecretHash = createHash('sha256').update(claimToken).digest('hex');
+  let orderId: number;
+  try {
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO couple_package_orders
+       (couple_user_id, package_code, amount_rwf, payment_method, payer_msisdn, provider_reference, claim_secret_hash)
+       VALUES (NULL, ?, ?, ?, ?, ?, ?)`,
+      [plan.code, plan.priceRwf, parsed.data.paymentMethod, phone, providerReference, claimSecretHash],
+    );
+    orderId = result.insertId;
+  } catch (error) { next(error); return; }
+
+  if (parsed.data.paymentMethod === 'bank_transfer') {
+    res.status(202).json({
+      orderId,
+      claimToken,
+      status: 'pending',
+      paymentMethod: 'bank_transfer',
+      bankTransfer: bankTransferDetails,
+    });
+    return;
+  }
+
+  try {
+    if (!config || !phone) throw new Error('MTN Mobile Money checkout configuration was lost.');
+    const token = await getMomoAccessToken(config);
+    const response = await fetch(`${config.baseUrl}/collection/v1_0/requesttopay`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Reference-Id': providerReference,
+        'X-Target-Environment': config.targetEnvironment,
+        'Ocp-Apim-Subscription-Key': config.subscriptionKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: String(plan.priceRwf),
+        currency: 'RWF',
+        externalId: providerReference,
+        payer: { partyIdType: 'MSISDN', partyId: phone },
+        payerMessage: `My Wedding Plan ${plan.name}`,
+        payeeNote: `Wedding planning ${plan.name}`,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status !== 202) {
+      await pool.execute("UPDATE couple_package_orders SET status = 'failed' WHERE id = ?", [orderId]);
+      console.error(`MTN MoMo public payment request was rejected (HTTP ${response.status}).`);
+      res.status(502).json({ error: 'MTN Mobile Money could not start this payment. Check the phone number and try again.' });
+      return;
+    }
+    res.status(202).json({ orderId, claimToken, status: 'pending', paymentMethod: 'mtn_momo' });
+  } catch (error) {
+    await pool.execute("UPDATE couple_package_orders SET status = 'failed' WHERE id = ?", [orderId]);
+    console.error('MTN MoMo public package payment could not be started:', error);
+    res.status(502).json({ error: 'Could not connect to MTN Mobile Money. Please try again.' });
+  }
+});
+
+app.post('/api/package-checkout/:id/status', async (req, res, next) => {
+  const id = readResourceId(req.params.id, res, 'package payment');
+  if (id === null) return;
+  const token = z.string().length(64).safeParse(req.body?.claimToken);
+  if (!token.success) { res.status(400).json({ error: 'This checkout session is invalid. Please contact the planning team.' }); return; }
+  const claimSecretHash = createHash('sha256').update(token.data).digest('hex');
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT id, package_code AS packageCode, amount_rwf AS amountRwf, payment_method AS paymentMethod,
+        payer_msisdn AS phone, payer_reference AS payerReference, provider_reference AS providerReference, status
+       FROM couple_package_orders WHERE id = ? AND couple_user_id IS NULL AND claim_secret_hash = ?`,
+      [id, claimSecretHash],
+    );
+    if (!rows.length) { res.status(404).json({ error: 'Checkout not found. Sign in if you have already linked it to an account.' }); return; }
+    const order = rows[0];
+    let status = order.status as 'pending' | 'successful' | 'failed';
+    if (status === 'pending' && order.paymentMethod === 'mtn_momo') {
+      const config = getMomoConfiguration();
+      if (!config) { res.status(503).json({ error: 'MTN Mobile Money checkout is not configured yet.' }); return; }
+      status = await getPackageOrderStatus(config, String(order.providerReference));
+      await pool.execute(
+        `UPDATE couple_package_orders SET status = ?, paid_at = CASE WHEN ? = 'successful' THEN CURRENT_TIMESTAMP ELSE paid_at END
+         WHERE id = ? AND couple_user_id IS NULL AND claim_secret_hash = ? AND status = 'pending'`,
+        [status, status, id, claimSecretHash],
+      );
+    }
+    const plan = getPackagePlan(String(order.packageCode));
+    if (!plan) throw new Error(`Unknown package code in order ${String(order.id)}.`);
+    res.json({
+      id: Number(order.id),
+      code: plan.code,
+      name: plan.name,
+      priceRwf: Number(order.amountRwf),
+      status,
+      paymentMethod: order.paymentMethod,
+      phone: order.phone,
+      payerReference: order.payerReference,
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/package-checkout/:id/reference', async (req, res, next) => {
+  const id = readResourceId(req.params.id, res, 'package payment');
+  if (id === null) return;
+  const input = z.object({ claimToken: z.string().length(64), reference: z.string().trim().min(3).max(120) }).safeParse(req.body);
+  if (!input.success) { res.status(400).json({ error: input.error.issues[0]?.message ?? 'Enter the bank transfer reference.' }); return; }
+  const claimSecretHash = createHash('sha256').update(input.data.claimToken).digest('hex');
+  try {
+    const [result] = await pool.execute<ResultSetHeader>(
+      `UPDATE couple_package_orders SET payer_reference = ?
+       WHERE id = ? AND couple_user_id IS NULL AND claim_secret_hash = ? AND payment_method = 'bank_transfer' AND status = 'pending'`,
+      [input.data.reference, id, claimSecretHash],
+    );
+    if (!result.affectedRows) { res.status(404).json({ error: 'Pending bank transfer not found.' }); return; }
+    res.json({ submitted: true });
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+      res.status(409).json({ error: 'That transfer reference has already been submitted. Check it and try again.' });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.post('/api/couple/package-orders/claim', requireAuth, requireCouple, async (req, res, next) => {
+  const coupleUserId = req.user?.id;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  const parsed = packageOrderClaimSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: 'The checkout link is invalid. Please contact the planning team.' }); return; }
+  const claimSecretHash = createHash('sha256').update(parsed.data.claimToken).digest('hex');
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [claimed] = await connection.query<RowDataPacket[]>(
+      `SELECT id FROM couple_package_orders
+       WHERE id = ? AND couple_user_id = ? AND status IN ('pending','successful') LIMIT 1 FOR UPDATE`,
+      [parsed.data.orderId, coupleUserId],
+    );
+    if (claimed.length) {
+      await connection.commit();
+      res.json({ claimed: true });
+      return;
+    }
+    const [existing] = await connection.query<RowDataPacket[]>(
+      "SELECT id FROM couple_package_orders WHERE couple_user_id = ? AND status IN ('pending','successful') LIMIT 1 FOR UPDATE",
+      [coupleUserId],
+    );
+    if (existing.length) {
+      await connection.rollback();
+      res.status(409).json({ error: 'This account already has an active or pending package payment.' });
+      return;
+    }
+    const [result] = await connection.execute<ResultSetHeader>(
+      `UPDATE couple_package_orders SET couple_user_id = ?, claim_secret_hash = NULL
+       WHERE id = ? AND couple_user_id IS NULL AND claim_secret_hash = ? AND status IN ('pending','successful')`,
+      [coupleUserId, parsed.data.orderId, claimSecretHash],
+    );
+    if (!result.affectedRows) {
+      await connection.rollback();
+      res.status(404).json({ error: 'This checkout could not be linked. It may already be linked to an account or expired.' });
+      return;
+    }
+    await connection.commit();
+    res.json({ claimed: true });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally { connection.release(); }
+});
+
+app.get('/api/couple/package', requireAuth, requireCouple, async (req, res, next) => {
+  const coupleUserId = req.user?.id;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  try {
+    const [[activeRows], [pendingRows]] = await Promise.all([
+      pool.query<RowDataPacket[]>(`SELECT id, package_code AS packageCode, amount_rwf AS amountRwf,
+        payment_method AS paymentMethod, status, paid_at AS paidAt
+        FROM couple_package_orders WHERE couple_user_id = ? AND status = 'successful' ORDER BY paid_at DESC LIMIT 1`, [coupleUserId]),
+      pool.query<RowDataPacket[]>(`SELECT id, package_code AS packageCode, amount_rwf AS amountRwf,
+        payment_method AS paymentMethod, payer_msisdn AS phone, payer_reference AS payerReference, status
+        FROM couple_package_orders WHERE couple_user_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1`, [coupleUserId]),
+    ]);
+    const describe = (order: RowDataPacket) => {
+      const plan = getPackagePlan(String(order.packageCode));
+      if (!plan) throw new Error(`Unknown package code in order ${String(order.id)}.`);
+      return {
+        id: Number(order.id),
+        code: plan.code,
+        name: plan.name,
+        priceRwf: Number(order.amountRwf),
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        ...('phone' in order ? { phone: order.phone, payerReference: order.payerReference } : {}),
+      };
+    };
+    res.json({
+      plans: packagePlans,
+      activePackage: activeRows[0] ? describe(activeRows[0]) : null,
+      pendingOrder: pendingRows[0] ? describe(pendingRows[0]) : null,
+      paymentMethods: { mtnMomo: Boolean(getMomoConfiguration()), bankTransfer: getBankTransferDetails() },
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/couple/package-orders', requireAuth, requireCouple, async (req, res, next) => {
+  const coupleUserId = req.user?.id;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  const parsed = packageOrderSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your package and payment phone number.' }); return; }
+  const config = parsed.data.paymentMethod === 'mtn_momo' ? getMomoConfiguration() : null;
+  const bankTransferDetails = parsed.data.paymentMethod === 'bank_transfer' ? getBankTransferDetails() : null;
+  if (parsed.data.paymentMethod === 'mtn_momo' && !config) {
+    res.status(503).json({ error: 'MTN Mobile Money checkout is not configured yet. Please choose bank transfer or contact the wedding planning team.' });
+    return;
+  }
+  if (parsed.data.paymentMethod === 'bank_transfer' && !bankTransferDetails) {
+    res.status(503).json({ error: 'Bank transfer is not configured yet. Please contact the wedding planning team.' });
+    return;
+  }
+  const phone = parsed.data.paymentMethod === 'mtn_momo' ? normalizeRwandaMsisdn(parsed.data.phone ?? '') : null;
+  if (parsed.data.paymentMethod === 'mtn_momo' && !phone) { res.status(400).json({ error: 'Enter a valid Rwanda MTN number, for example 0788 123 456.' }); return; }
+  const plan = getPackagePlan(parsed.data.packageCode);
+  if (!plan) { res.status(400).json({ error: 'Choose a valid package.' }); return; }
+  const reference = randomUUID();
+  let orderId: number;
+  try {
+    const [activeOrders] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM couple_package_orders WHERE couple_user_id = ? AND status = 'successful' LIMIT 1", [coupleUserId],
+    );
+    if (activeOrders.length) { res.status(409).json({ error: 'Your planning package is already active. Contact the planning team if you need to change your package.' }); return; }
+    const [existing] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM couple_package_orders WHERE couple_user_id = ? AND status = 'pending' LIMIT 1", [coupleUserId],
+    );
+    if (existing.length) { res.status(409).json({ error: 'You already have a pending payment. Check its status before starting another.' }); return; }
+    const [result] = await pool.execute<ResultSetHeader>(
+      `INSERT INTO couple_package_orders
+       (couple_user_id, package_code, amount_rwf, payment_method, payer_msisdn, provider_reference)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [coupleUserId, parsed.data.packageCode, plan.priceRwf, parsed.data.paymentMethod, phone, reference],
+    );
+    orderId = result.insertId;
+  } catch (error) { next(error); return; }
+
+  if (parsed.data.paymentMethod === 'bank_transfer') {
+    res.status(202).json({
+      orderId,
+      status: 'pending',
+      paymentMethod: 'bank_transfer',
+      message: 'Transfer the package price to the account shown, then submit your bank transfer reference.',
+      bankTransfer: bankTransferDetails,
+    });
+    return;
+  }
+
+  if (!config || !phone) {
+    await pool.execute("UPDATE couple_package_orders SET status = 'failed' WHERE id = ? AND status = 'pending'", [orderId]);
+    res.status(503).json({ error: 'MTN Mobile Money checkout is not configured.' });
+    return;
+  }
+
+  try {
+    const token = await getMomoAccessToken(config);
+    const response = await fetch(`${config.baseUrl}/collection/v1_0/requesttopay`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Reference-Id': reference,
+        'X-Target-Environment': config.targetEnvironment,
+        'Ocp-Apim-Subscription-Key': config.subscriptionKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: String(plan.priceRwf),
+        currency: 'RWF',
+        externalId: reference,
+        payer: { partyIdType: 'MSISDN', partyId: phone },
+        payerMessage: `My Wedding Plan ${plan.name}`,
+        payeeNote: `Wedding planning ${plan.name}`,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status !== 202) {
+      await pool.execute("UPDATE couple_package_orders SET status = 'failed' WHERE id = ? AND status = 'pending'", [orderId]);
+      console.error(`MTN MoMo payment request was rejected (HTTP ${response.status}).`);
+      res.status(502).json({ error: 'MTN Mobile Money could not start this payment. Check the phone number and try again.' });
+      return;
+    }
+    res.status(202).json({ orderId, status: 'pending', message: 'Approve the payment request on your MTN Mobile Money phone.' });
+  } catch (error) {
+    await pool.execute("UPDATE couple_package_orders SET status = 'failed' WHERE id = ? AND status = 'pending'", [orderId]);
+    console.error('MTN MoMo package payment could not be started:', error);
+    res.status(502).json({ error: 'Could not connect to MTN Mobile Money. Please try again.' });
+  }
+});
+
+app.get('/api/couple/package-orders/:id', requireAuth, requireCouple, async (req, res, next) => {
+  const coupleUserId = req.user?.id;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  const id = readResourceId(req.params.id, res, 'package payment');
+  if (id === null) return;
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT id, package_code AS packageCode, amount_rwf AS amountRwf, payment_method AS paymentMethod,
+        payer_reference AS payerReference, provider_reference AS providerReference, status
+       FROM couple_package_orders WHERE id = ? AND couple_user_id = ?`,
+      [id, coupleUserId],
+    );
+    if (!rows.length) { res.status(404).json({ error: 'Package payment not found.' }); return; }
+    const order = rows[0];
+    let status = order.status as 'pending' | 'successful' | 'failed';
+    if (status === 'pending' && order.paymentMethod === 'mtn_momo') {
+      const config = getMomoConfiguration();
+      if (!config) { res.status(503).json({ error: 'MTN Mobile Money checkout is not configured yet.' }); return; }
+      status = await getPackageOrderStatus(config, String(order.providerReference));
+      await pool.execute(
+        `UPDATE couple_package_orders SET status = ?, paid_at = CASE WHEN ? = 'successful' THEN CURRENT_TIMESTAMP ELSE paid_at END
+         WHERE id = ? AND status = 'pending'`,
+        [status, status, id],
+      );
+    }
+    const plan = getPackagePlan(String(order.packageCode));
+    if (!plan) throw new Error(`Unknown package code in order ${String(order.id)}.`);
+    res.json({
+      id: Number(order.id),
+      code: plan.code,
+      name: plan.name,
+      priceRwf: Number(order.amountRwf),
+      status,
+      paymentMethod: order.paymentMethod,
+      payerReference: order.payerReference,
+    });
+  } catch (error) { next(error); }
+});
+
+app.put('/api/couple/package-orders/:id/reference', requireAuth, requireCouple, async (req, res, next) => {
+  const coupleUserId = req.user?.id;
+  if (!coupleUserId) { res.status(403).json({ error: 'Couple access required.' }); return; }
+  const id = readResourceId(req.params.id, res, 'package payment');
+  if (id === null) return;
+  const parsed = bankTransferReferenceSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Enter the bank transfer reference.' }); return; }
+  try {
+    const [result] = await pool.execute<ResultSetHeader>(
+      `UPDATE couple_package_orders SET payer_reference = ?
+       WHERE id = ? AND couple_user_id = ? AND payment_method = 'bank_transfer' AND status = 'pending'`,
+      [parsed.data.reference, id, coupleUserId],
+    );
+    if (result.affectedRows === 0) {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        'SELECT id FROM couple_package_orders WHERE id = ? AND couple_user_id = ? AND payment_method = ? AND status = ?',
+        [id, coupleUserId, 'bank_transfer', 'pending'],
+      );
+      if (!rows.length) { res.status(404).json({ error: 'Pending bank transfer not found.' }); return; }
+    }
+    res.json({ submitted: true });
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+      res.status(409).json({ error: 'That transfer reference has already been submitted. Check it and try again.' });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.get('/api/admin/package-orders', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT o.id, o.package_code AS packageCode, o.amount_rwf AS amountRwf, o.payer_reference AS payerReference,
+        o.created_at AS createdAt, u.name AS coupleName, u.email AS coupleEmail
+       FROM couple_package_orders o
+       LEFT JOIN users u ON u.id = o.couple_user_id
+       WHERE o.payment_method = 'bank_transfer' AND o.status = 'pending'
+       ORDER BY o.created_at ASC`,
+    );
+    res.json({ orders: rows.map((row) => {
+      const plan = getPackagePlan(String(row.packageCode));
+      if (!plan) throw new Error(`Unknown package code in order ${String(row.id)}.`);
+      return {
+        id: Number(row.id),
+        code: plan.code,
+        name: plan.name,
+        priceRwf: Number(row.amountRwf),
+        payerReference: row.payerReference as string | null,
+        createdAt: row.createdAt,
+        coupleName: (row.coupleName as string | null) ?? 'Unlinked customer',
+        coupleEmail: (row.coupleEmail as string | null) ?? 'Link after customer sign-in',
+      };
+    }) });
+  } catch (error) { next(error); }
+});
+
+app.put('/api/admin/package-orders/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  const id = readResourceId(req.params.id, res, 'package payment');
+  if (id === null) return;
+  const parsed = packageOrderReviewSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: 'Choose whether the bank transfer is confirmed or rejected.' }); return; }
+  try {
+    const [result] = await pool.execute<ResultSetHeader>(
+      `UPDATE couple_package_orders SET status = ?, paid_at = CASE WHEN ? = 'successful' THEN CURRENT_TIMESTAMP ELSE paid_at END
+       WHERE id = ? AND payment_method = 'bank_transfer' AND status = 'pending'
+         AND (? = 'failed' OR payer_reference IS NOT NULL)`,
+      [parsed.data.status, parsed.data.status, id, parsed.data.status],
+    );
+    if (result.affectedRows === 0) {
+      res.status(409).json({ error: 'This transfer is no longer pending or has no submitted reference.' });
+      return;
+    }
+    res.json({ updated: true });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/contact-messages', async (req, res, next) => {
   const parsed = contactMessageSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your contact message.' }); return; }
@@ -503,7 +1046,7 @@ app.post('/api/auth/logout', (req, res, next) => {
   });
 });
 
-app.get('/api/couple/profile', requireAuth, async (req, res, next) => {
+app.get('/api/couple/profile', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [rows] = await pool.query<import('./db.js').CoupleProfileRow[]>(
@@ -514,13 +1057,13 @@ app.get('/api/couple/profile', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/vendor-recommendations', requireAuth, async (req, res, next) => {
+app.get('/api/couple/vendor-recommendations', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try { const data = await getCoupleVendorAvailability(req.user.id, false); res.json({ recommendations: data.recommendations }); }
   catch (error) { next(error); }
 });
 
-app.put('/api/couple/profile', requireAuth, async (req, res, next) => {
+app.put('/api/couple/profile', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   const parsed = weddingDetailsSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your wedding details.' }); return; }
@@ -695,7 +1238,7 @@ app.get('/api/admin/inspiration', requireAuth, requireAdmin, async (_req, res, n
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/inspiration', requireAuth, async (req, res, next) => {
+app.get('/api/couple/inspiration', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [items] = await pool.query<RowDataPacket[]>(`SELECT id, title, item_type AS itemType, vendor_category AS vendorCategory, description, price_rwf AS priceRwf,
@@ -705,7 +1248,7 @@ app.get('/api/couple/inspiration', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/vendors', requireAuth, async (req, res, next) => {
+app.get('/api/couple/vendors', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [vendors] = await pool.query<RowDataPacket[]>(`SELECT id, business_name AS businessName, category, location,
@@ -719,7 +1262,7 @@ app.get('/api/couple/vendors', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/vendors/:id/image', requireAuth, async (req, res, next) => {
+app.get('/api/couple/vendors/:id/image', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).end(); return; }
   const id = readResourceId(req.params.id, res, 'vendor');
   if (id === null) return;
@@ -732,7 +1275,7 @@ app.get('/api/couple/vendors/:id/image', requireAuth, async (req, res, next) => 
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/inspiration/:id/image', requireAuth, async (req, res, next) => {
+app.get('/api/couple/inspiration/:id/image', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).end(); return; }
   const id = readResourceId(req.params.id, res, 'inspiration item');
   if (id === null) return;
@@ -846,6 +1389,8 @@ app.put('/api/admin/checklists/:id', requireAuth, requireAdmin, async (req, res,
 app.get('/api/admin/budget-plans', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const [rows] = await pool.query<RowDataPacket[]>(`SELECT u.id AS coupleUserId, u.name AS coupleName, u.email AS coupleEmail,
+      (SELECT paid.package_code FROM couple_package_orders paid WHERE paid.couple_user_id = u.id AND paid.status = 'successful'
+        ORDER BY paid.paid_at DESC LIMIT 1) AS paidPackageCode,
       cp.budget_rwf AS requestedBudgetRwf, cp.guest_count AS guestCount, cp.location,
       cp.contact_phone AS contactPhone, cp.budget_status AS budgetStatus,
       cp.wedding_format AS weddingFormat, cp.vendor_needs AS vendorNeeds,
@@ -860,6 +1405,8 @@ app.get('/api/admin/budget-plans', requireAuth, requireAdmin, async (_req, res, 
       ) latest_plan ON latest_plan.couple_user_id = u.id
       LEFT JOIN wedding_plans p ON p.couple_user_id = u.id AND p.version = latest_plan.version
       WHERE u.role = 'couple' AND cp.budget_rwf IS NOT NULL AND cp.guest_count IS NOT NULL
+        AND EXISTS (SELECT 1 FROM couple_package_orders paid
+          WHERE paid.couple_user_id = u.id AND paid.status = 'successful')
       ORDER BY (p.status = 'proposed') DESC, p.is_over_budget DESC, p.generated_at DESC, u.name`);
     const planIds = rows.map((row) => row.planId).filter((id) => id !== null);
     let allocations: RowDataPacket[] = [];
@@ -919,6 +1466,11 @@ app.post('/api/admin/budget-plans/:coupleUserId/generate', requireAuth, requireA
   if (coupleUserId === null) return;
   let connection;
   try {
+    const [paidOrders] = await pool.query<RowDataPacket[]>(
+      "SELECT id FROM couple_package_orders WHERE couple_user_id = ? AND status = 'successful' LIMIT 1",
+      [coupleUserId],
+    );
+    if (!paidOrders.length) { res.status(402).json({ error: 'A paid planning package is required before preparing a budget plan.' }); return; }
     const [profiles] = await pool.query<RowDataPacket[]>(`SELECT cp.budget_rwf AS budgetRwf, cp.guest_count AS guestCount,
       DATE_FORMAT(cp.wedding_date, '%Y-%m-%d') AS weddingDate FROM couple_profiles cp
       INNER JOIN users u ON u.id = cp.user_id WHERE cp.user_id = ? AND u.role = 'couple'
@@ -1114,13 +1666,13 @@ app.put('/api/admin/budget-plans/:coupleUserId/vendor-selection/:category', requ
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/vendor-availability', requireAuth, async (req, res, next) => {
+app.get('/api/couple/vendor-availability', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try { res.json(await getCoupleVendorAvailability(req.user.id, false)); }
   catch (error) { next(error); }
 });
 
-app.get('/api/couple/workspace', requireAuth, async (req, res, next) => {
+app.get('/api/couple/workspace', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [planResult, contractResult, paymentResult] = await Promise.all([
@@ -1154,7 +1706,7 @@ app.get('/api/couple/workspace', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/checklists', requireAuth, async (req, res, next) => {
+app.get('/api/couple/checklists', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const tasks = await getVendorChecklist(req.user.id);
@@ -1162,7 +1714,7 @@ app.get('/api/couple/checklists', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.put('/api/couple/checklists/:id/status', requireAuth, async (req, res, next) => {
+app.put('/api/couple/checklists/:id/status', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   const id = readResourceId(req.params.id, res, 'checklist task');
   if (id === null) return;
@@ -1175,7 +1727,7 @@ app.put('/api/couple/checklists/:id/status', requireAuth, async (req, res, next)
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/contracts/:id/document', requireAuth, async (req, res, next) => {
+app.get('/api/couple/contracts/:id/document', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   const id = readResourceId(req.params.id, res, 'contract');
   if (id === null) return;
@@ -1187,7 +1739,7 @@ app.get('/api/couple/contracts/:id/document', requireAuth, async (req, res, next
   } catch (error) { next(error); }
 });
 
-app.get('/api/couple/payments/:id/evidence', requireAuth, async (req, res, next) => {
+app.get('/api/couple/payments/:id/evidence', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   const id = readResourceId(req.params.id, res, 'payment');
   if (id === null) return;
