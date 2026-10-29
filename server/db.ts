@@ -30,6 +30,8 @@ export interface UserRow extends RowDataPacket {
 export interface CoupleProfileRow extends RowDataPacket {
   budgetRwf: number | null;
   guestCount: number | null;
+  contactPhone: string | null;
+  budgetStatus: 'pending' | 'proposed' | 'approved' | 'changes_requested';
   weddingDate: string | null;
   location: string | null;
   style: string | null;
@@ -88,6 +90,20 @@ export async function initializeDatabase(): Promise<void> {
   await ensureProfileColumn('other_costs_description', 'VARCHAR(500) NULL');
   await ensureProfileColumn('wedding_format', "VARCHAR(40) NULL");
   await ensureProfileColumn('vendor_needs', 'TEXT NULL');
+  await ensureProfileColumn('contact_phone', 'VARCHAR(40) NULL');
+  const budgetStatusAdded = await ensureProfileColumn('budget_status', "VARCHAR(30) NOT NULL DEFAULT 'pending'");
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS contact_messages (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(80) NOT NULL,
+      email VARCHAR(254) NOT NULL,
+      phone VARCHAR(40) NULL,
+      message TEXT NOT NULL,
+      status ENUM('new','handled') NOT NULL DEFAULT 'new',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_contact_messages_status_created (status, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
       session_id VARCHAR(128) NOT NULL PRIMARY KEY,
@@ -337,16 +353,29 @@ export async function initializeDatabase(): Promise<void> {
       CONSTRAINT fk_vendor_checklist_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
+  if (budgetStatusAdded) {
+    const [plans] = await pool.query<RowDataPacket[]>(`SELECT p.couple_user_id AS coupleUserId, p.status
+      FROM wedding_plans p
+      INNER JOIN (
+        SELECT couple_user_id, MAX(version) AS version FROM wedding_plans GROUP BY couple_user_id
+      ) latest ON latest.couple_user_id = p.couple_user_id AND latest.version = p.version`);
+    for (const plan of plans) {
+      const status = plan.status === 'proposed' ? 'proposed' : plan.status === 'approved' ? 'approved' : 'changes_requested';
+      await pool.execute('UPDATE couple_profiles SET budget_status = ? WHERE user_id = ?', [status, plan.coupleUserId]);
+    }
+  }
 }
 
-async function ensureProfileColumn(name: 'style' | 'special_requirements' | 'other_costs_description' | 'wedding_format' | 'vendor_needs', definition: string): Promise<void> {
+async function ensureProfileColumn(name: 'style' | 'special_requirements' | 'other_costs_description' | 'wedding_format' | 'vendor_needs' | 'contact_phone' | 'budget_status', definition: string): Promise<boolean> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
     ['couple_profiles', name],
   );
   if (rows.length === 0) {
     await pool.execute(`ALTER TABLE couple_profiles ADD COLUMN ${name} ${definition}`);
+    return true;
   }
+  return false;
 }
 
 async function ensureVendorColumn(name: 'pricing_basis' | 'image_key' | 'image_mime_type' | 'color_palette', definition: string): Promise<void> {

@@ -38,9 +38,9 @@
   .admin-menu-button { display: grid; flex: 0 0 36px; }
   .admin-topbar { gap: 8px; }
   .admin-topbar>div:first-of-type { margin-right: auto; }
-  .admin-sidebar { left: -270px; width: 260px; transition: left .2s; z-index: 31; overflow-y: auto; }
-  .admin-sidebar.open { left: 0; }
-  .admin-nav-scrim { display: block; position: fixed; inset: 0; z-index: 30; border: 0; }
+  .admin-sidebar { left: 0; transform: translateX(-100%); width: 260px; transition: transform .2s; z-index: 31; overflow-y: auto; }
+  .admin-sidebar.open { transform: translateX(0); }
+  .admin-nav-scrim { display: block; position: fixed; inset: 0; z-index: 30; border: 0; background: rgb(24 35 30 / 48%); }
   .admin-header-actions { gap: 7px; }
   .admin-header-actions .pill-button { font-size: 0; padding: 0 9px; }
   .admin-header-actions .pill-button svg { width: 16px; }

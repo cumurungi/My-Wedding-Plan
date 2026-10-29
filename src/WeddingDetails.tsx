@@ -22,6 +22,7 @@ export default function WeddingDetailsForm({ user, profile, busy, error, onSave 
     void onSave({
       budgetRwf: Number(values.get('budgetRwf')),
       guestCount: Number(values.get('guestCount')),
+      contactPhone: String(values.get('contactPhone') ?? '').trim(),
       weddingDate: String(values.get('weddingDate') ?? ''),
       location: String(values.get('location') ?? '').trim(),
       style: String(values.get('style') ?? ''),
@@ -45,6 +46,7 @@ export default function WeddingDetailsForm({ user, profile, busy, error, onSave 
         <div className="details-form-grid">
           <label><span><Wallet size={15} /> {t('Wedding budget')} <em>RWF</em></span><input name="budgetRwf" type="number" min="1" max="10000000000000" step="10000" placeholder="10,000,000" defaultValue={profile.budgetRwf ?? ''} required /><small>{t('Your total budget for the celebration.')}</small></label>
           <label><span><Users size={15} /> {t('Guest count')}</span><input name="guestCount" type="number" min="1" max="100000" step="1" placeholder="150" defaultValue={profile.guestCount ?? ''} required /><small>{t('An estimate is perfectly fine.')}</small></label>
+          <label><span>{t('Phone number')} <em>{t('Optional')}</em></span><input name="contactPhone" type="tel" maxLength={40} autoComplete="tel" placeholder="+250 7xx xxx xxx" defaultValue={profile.contactPhone ?? ''} /><small>{t('Share a number if you would like our team to contact you about your budget.')}</small></label>
           <label><span><CalendarDays size={15} /> {t('Wedding date')} <em>{t('Optional')}</em></span><input name="weddingDate" type="date" min={todayLocal} defaultValue={profile.weddingDate ?? ''} /><small>{t('Still deciding? You can add it later.')}</small></label>
           <label><span><MapPin size={15} /> {t('Location')}</span><input name="location" type="text" minLength={2} maxLength={160} placeholder="Kigali, Rwanda" defaultValue={profile.location ?? ''} required /><small>{t('City, district, or preferred area.')}</small></label>
           <label className="details-wide"><span><Sparkles size={15} /> {t('Wedding style')} <em>{t('Optional')}</em></span><select name="style" defaultValue={profile.style ?? ''}><option value="">{t('We are still exploring')}</option><option>{t('Classic and elegant')}</option><option>{t('Garden romance')}</option><option>{t('Modern and minimal')}</option><option>{t('Cultural celebration')}</option><option>{t('Destination wedding')}</option><option>{t('Other')}</option></select></label>

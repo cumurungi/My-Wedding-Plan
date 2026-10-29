@@ -1,12 +1,12 @@
 # My Wedding Plan
 
-A wedding-planning platform foundation with a warm, calm dashboard inspired by the supplied reference. Phase 1 uses a **React + Vite + TypeScript frontend** and a **Node.js + Express + TypeScript backend with MySQL**.
+A wedding-planning platform foundation with a warm, calm dashboard inspired by the supplied reference. It uses a **React + Vite + TypeScript frontend** and a **Node.js + Express + TypeScript backend** with MySQL-compatible database support, including TiDB Cloud.
 
 ## Requirements
 
 - Node.js 20 or newer
 - npm
-- MySQL 8 or newer
+- MySQL 8 or newer, or a MySQL-compatible TiDB Cloud cluster
 
 ## Start locally
 
@@ -15,9 +15,9 @@ A wedding-planning platform foundation with a warm, calm dashboard inspired by t
 3. Run `npm install`.
 4. Run `npm run dev` and open the Vite URL shown in the terminal.
 
-The API listens on port 3001 by default. On startup it creates the users, couple profile, MySQL session, vendor, contract, and payment tables, then adds any missing wedding-details columns to existing profile tables. Couple accounts are always assigned their role by the server; registration cannot grant administrator access. The configured administrator account is created once, if that email does not already exist. Uploaded contracts and payment evidence are stored under `server/data/private-files` and are only served through admin-authenticated API routes. Back up that directory alongside the database.
+The API listens on port 3001 by default. On startup it creates missing application tables, including the contact-message inbox, and adds missing profile columns. These are non-destructive `CREATE TABLE IF NOT EXISTS` and guarded `ALTER TABLE` operations; existing client and wedding records are preserved. Contact form submissions are stored in the configured database and shown in the admin inbox. Couple accounts are always assigned their role by the server; registration cannot grant administrator access. The configured administrator account is created once, if that email does not already exist. Uploaded contracts and payment evidence are stored under `server/data/private-files` and are only served through admin-authenticated API routes. Back up that directory alongside the database.
 
-For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Production MySQL connections use TLS, as required by TiDB Cloud Starter. Use a dedicated MySQL user with permissions limited to this database.
+For deployment, set `NODE_ENV=production`, use a long random `SESSION_SECRET`, serve the app over HTTPS, and set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first administrator account. Configure `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE` for the MySQL-compatible production database. Production connections use TLS, as required by TiDB Cloud Starter. Use a dedicated database user with permissions limited to this application database.
 
 The Vercel frontend proxies `/api/*` requests to the Render backend using `vercel.json`. Update that rewrite destination if the Render service URL changes.
 
@@ -30,6 +30,8 @@ The Vercel frontend proxies `/api/*` requests to the Render backend using `verce
 - Couple and admin role guards
 - Admin workspace shell with the requested planning areas
 - Couple wedding-details onboarding and profile editing, with validated, persistent budget, guest count, date, location, style, and special requirements
+- Couple contact phone collection (optional) and a public Contact Us form with an administrator inbox
+- Budget request status flow: new or updated budget details are pending, generating a proposal moves the request to review, and admin approval or revision requests update its status
 - Live admin overview metrics and an admin-only vendor directory with search, vendor details, verification, pricing approval, and active/inactive status
 - Admin contract register: upload a vendor contract PDF for a couple, search or filter by couple, see vendor and payment balance details, download the private file, and update pending/partially signed/fully signed status
 - Admin payment tracker: record deposits, installments, due dates, paid dates, and optional private payment evidence against a vendor contract

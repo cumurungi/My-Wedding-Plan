@@ -3,6 +3,8 @@ export type User = { id: number; name: string; email: string; role: 'couple' | '
 export type WeddingProfile = {
   budgetRwf?: number | null;
   guestCount?: number | null;
+  contactPhone?: string | null;
+  budgetStatus?: 'pending' | 'proposed' | 'approved' | 'changes_requested' | null;
   weddingDate?: string | null;
   location?: string | null;
   style?: string | null;
@@ -15,6 +17,7 @@ export type WeddingProfile = {
 export type WeddingDetails = {
   budgetRwf: number;
   guestCount: number;
+  contactPhone: string;
   weddingDate: string;
   location: string;
   style: string;

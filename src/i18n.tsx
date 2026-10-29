@@ -5,7 +5,7 @@ const translations: Record<Language, Record<string, string>> = {
   en: {},
   fr: {
     'Language': 'Langue', 'English': 'Anglais', 'French': 'Français', 'Kinyarwanda': 'Kinyarwanda',
-    'Budget': 'Budget', 'Checklist': 'Liste de tâches', 'Inspiration': 'Inspiration', 'Payments': 'Paiements',
+    'Budget': 'Budget', 'Checklist': 'Liste de tâches', 'Inspiration': 'Inspiration', 'Payments': 'Paiements', 'Contact': 'Contact',
     'Save plan': 'Enregistrer le plan', 'Share plan': 'Partager le plan', 'Sign out': 'Se déconnecter', 'Wedding account': 'Compte mariage',
     'Sign in': 'Se connecter', 'Create an account': 'Créer un compte', 'Create free account': 'Créer un compte gratuit', 'Edit details': 'Modifier les détails', 'Edit wedding details': 'Modifier les détails du mariage',
     'Your wedding plan overview': 'Aperçu de votre plan de mariage', 'Sign in to view your wedding details.': 'Connectez-vous pour voir les détails de votre mariage.',
@@ -23,6 +23,7 @@ const translations: Record<Language, Record<string, string>> = {
     'YOUR WEDDING WORKSPACE': 'VOTRE ESPACE MARIAGE', 'Sign in to see your plan': 'Connectez-vous pour voir votre plan',
     'Your budget, checklist, inspiration, contracts, and payment records are private to your account.': 'Votre budget, votre liste, vos inspirations, contrats et paiements sont privés à votre compte.',
     'Budget proposal': 'Proposition de budget', 'Under review': 'En cours d’examen', 'Your planning team will share a detailed budget proposal here.': 'Votre équipe partagera ici une proposition détaillée de budget.',
+    'Contact us': 'Contactez-nous', 'Send a message to our wedding planning team.': 'Envoyez un message à notre équipe de planification.', 'Phone number': 'Numéro de téléphone',
     'Contracts': 'Contrats', 'No vendor contracts have been shared with your account yet.': 'Aucun contrat de prestataire n’a encore été partagé avec votre compte.',
     'PAYMENT SCHEDULE': 'ÉCHÉANCIER DES PAIEMENTS', 'No vendor payments have been recorded yet.': 'Aucun paiement de prestataire n’a encore été enregistré.',
     'A LITTLE MORE ORGANIZED, A LOT MORE YOU': 'MIEUX ORGANISÉ, TOUT EN VOUS RESSEMBLANT', 'Your day starts here.': 'Votre journée commence ici.', 'Welcome back.': 'Heureux de vous revoir.',
@@ -58,7 +59,7 @@ const translations: Record<Language, Record<string, string>> = {
   },
   rw: {
     'Language': 'Ururimi', 'English': 'Icyongereza', 'French': 'Igifaransa', 'Kinyarwanda': 'Ikinyarwanda',
-    'Budget': 'Ingengo y’imari', 'Checklist': 'Urutonde rw’imirimo', 'Inspiration': 'Ibitekerezo', 'Contracts': 'Amasezerano', 'Payments': 'Kwishyura',
+    'Budget': 'Ingengo y’imari', 'Checklist': 'Urutonde rw’imirimo', 'Inspiration': 'Ibitekerezo', 'Contracts': 'Amasezerano', 'Payments': 'Kwishyura', 'Contact': 'Twandikire',
     'Save plan': 'Bika gahunda', 'Share plan': 'Sangiza gahunda', 'Sign out': 'Sohoka', 'Wedding account': 'Konti y’ubukwe',
     'Sign in': 'Injira', 'Create an account': 'Fungura konti', 'Create free account': 'Fungura konti ku buntu', 'Edit details': 'Hindura amakuru', 'Edit wedding details': 'Hindura amakuru y’ubukwe',
     'Your wedding plan overview': 'Incamake ya gahunda y’ubukwe bwawe', 'Sign in to view your wedding details.': 'Injira urebe amakuru y’ubukwe bwawe.',
@@ -71,6 +72,7 @@ const translations: Record<Language, Record<string, string>> = {
     'YOUR WEDDING WORKSPACE': 'AHO UTEGURIRA UBUKWE BWAWE', 'Sign in to see your plan': 'Injira urebe gahunda yawe',
     'Your budget, checklist, inspiration, contracts, and payment records are private to your account.': 'Ingengo y’imari, urutonde, ibitekerezo, amasezerano n’inyandiko z’ubwishyu bigaragara kuri konti yawe gusa.',
     'Budget proposal': 'Umushinga w’ingengo y’imari', 'Under review': 'Birimo gusuzumwa', 'Your planning team will share a detailed budget proposal here.': 'Itsinda ry’imitegurire rizashyira hano umushinga urambuye w’ingengo y’imari.',
+    'Contact us': 'Twandikire', 'Send a message to our wedding planning team.': 'Ohereza ubutumwa ku itsinda ryacu ritegura ubukwe.', 'Phone number': 'Nimero ya telefoni',
     'No vendor contracts have been shared with your account yet.': 'Nta masezerano y’utanga serivisi arashyirwa kuri konti yawe.',
     'PAYMENT SCHEDULE': 'GAHUNDA Y’UBWISHYU', 'No vendor payments have been recorded yet.': 'Nta bwishyu bw’utanga serivisi burandikwa.',
     'A LITTLE MORE ORGANIZED, A LOT MORE YOU': 'TEGURA NEZA UBUKWE BUGARAGAZA WOWE', 'Your day starts here.': 'Urugendo rwanyu rutangirira hano.', 'Welcome back.': 'Urahawe ikaze nanone.',

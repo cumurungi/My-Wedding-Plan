@@ -55,6 +55,7 @@ const loginSchema = z.object({ email: z.string().trim().email(), password: z.str
 const weddingDetailsSchema = z.object({
   budgetRwf: z.coerce.number().int().min(1).max(10_000_000_000_000),
   guestCount: z.coerce.number().int().min(1).max(100_000),
+  contactPhone: z.string().trim().max(40).default(''),
   weddingDate: z.string().trim().max(10).refine((value) => {
     if (!value) return true;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -68,6 +69,13 @@ const weddingDetailsSchema = z.object({
   specialRequirements: z.string().trim().max(5000).default(''),
   otherCostsDescription: z.string().trim().max(500).default(''),
 });
+const contactMessageSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  email: z.string().trim().email().max(254),
+  phone: z.string().trim().max(40).default(''),
+  message: z.string().trim().min(10).max(5000),
+});
+const contactMessageStatusSchema = z.object({ status: z.enum(['new', 'handled']) });
 function parseVendorNeeds(value: string | null): string[] {
   if (!value) return [];
   try { const parsed: unknown = JSON.parse(value); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []; }
@@ -419,6 +427,16 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
 }
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.post('/api/contact-messages', async (req, res, next) => {
+  const parsed = contactMessageSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your contact message.' }); return; }
+  try {
+    const { name, email, phone, message } = parsed.data;
+    await pool.execute('INSERT INTO contact_messages (name, email, phone, message) VALUES (?, ?, ?, ?)',
+      [name, email.toLowerCase(), phone || null, message]);
+    res.status(201).json({ sent: true });
+  } catch (error) { next(error); }
+});
 app.get('/api/auth/me', async (req, res, next) => {
   try { res.json({ user: req.session.userId ? await getUser(req.session.userId) : null }); }
   catch (error) { next(error); }
@@ -489,7 +507,7 @@ app.get('/api/couple/profile', requireAuth, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [rows] = await pool.query<import('./db.js').CoupleProfileRow[]>(
-      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
+      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
       [req.user.id],
     );
     res.json({ profile: rows[0] ? { ...rows[0], vendorNeeds: parseVendorNeeds(rows[0].vendorNeeds) } : null });
@@ -509,16 +527,17 @@ app.put('/api/couple/profile', requireAuth, async (req, res, next) => {
   const details = parsed.data;
   try {
     await pool.execute(
-      `INSERT INTO couple_profiles (user_id, budget_rwf, guest_count, wedding_date, location, style, special_requirements, other_costs_description, wedding_format, vendor_needs)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO couple_profiles (user_id, budget_rwf, guest_count, contact_phone, budget_status, wedding_date, location, style, special_requirements, other_costs_description, wedding_format, vendor_needs)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE budget_rwf = VALUES(budget_rwf), guest_count = VALUES(guest_count),
+       contact_phone = VALUES(contact_phone), budget_status = 'pending',
        wedding_date = VALUES(wedding_date), location = VALUES(location), style = VALUES(style),
        special_requirements = VALUES(special_requirements), other_costs_description = VALUES(other_costs_description),
        wedding_format = VALUES(wedding_format), vendor_needs = VALUES(vendor_needs)`,
-      [req.user.id, details.budgetRwf, details.guestCount, details.weddingDate || null, details.location, details.style || null, details.specialRequirements || null, details.otherCostsDescription || null, details.weddingFormat, JSON.stringify(details.vendorNeeds)],
+      [req.user.id, details.budgetRwf, details.guestCount, details.contactPhone || null, details.weddingDate || null, details.location, details.style || null, details.specialRequirements || null, details.otherCostsDescription || null, details.weddingFormat, JSON.stringify(details.vendorNeeds)],
     );
     const [rows] = await pool.query<import('./db.js').CoupleProfileRow[]>(
-      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
+      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
       [req.user.id],
     );
     res.json({ profile: rows[0] ? { ...rows[0], vendorNeeds: parseVendorNeeds(rows[0].vendorNeeds) } : null });
@@ -540,6 +559,28 @@ app.get('/api/admin/overview', requireAuth, requireAdmin, async (_req, res, next
         COALESCE(SUM(p.status = 'pending' AND p.due_date BETWEEN CURRENT_DATE AND DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY)), 0) AS paymentsDueSoon FROM payments p`),
     ]);
     res.json({ ...accounts[0], ...profiles[0], ...vendors[0], ...contracts[0], ...payments[0] });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/admin/contact-messages', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const [messages] = await pool.query<RowDataPacket[]>(`SELECT id, name, email, phone, message, status,
+      DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') AS createdAt
+      FROM contact_messages ORDER BY (status = 'new') DESC, created_at DESC LIMIT 200`);
+    res.json({ messages });
+  } catch (error) { next(error); }
+});
+
+app.put('/api/admin/contact-messages/:id/status', requireAuth, requireAdmin, async (req, res, next) => {
+  const id = readResourceId(req.params.id, res, 'contact message');
+  if (id === null) return;
+  const parsed = contactMessageStatusSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: 'Choose whether this message is new or handled.' }); return; }
+  try {
+    const [messages] = await pool.query<RowDataPacket[]>('SELECT id FROM contact_messages WHERE id = ?', [id]);
+    if (!messages.length) { res.status(404).json({ error: 'Contact message not found.' }); return; }
+    await pool.execute('UPDATE contact_messages SET status = ? WHERE id = ?', [parsed.data.status, id]);
+    res.json({ updated: true });
   } catch (error) { next(error); }
 });
 
@@ -806,6 +847,7 @@ app.get('/api/admin/budget-plans', requireAuth, requireAdmin, async (_req, res, 
   try {
     const [rows] = await pool.query<RowDataPacket[]>(`SELECT u.id AS coupleUserId, u.name AS coupleName, u.email AS coupleEmail,
       cp.budget_rwf AS requestedBudgetRwf, cp.guest_count AS guestCount, cp.location,
+      cp.contact_phone AS contactPhone, cp.budget_status AS budgetStatus,
       cp.wedding_format AS weddingFormat, cp.vendor_needs AS vendorNeeds,
       cp.other_costs_description AS otherCostsDescription,
       DATE_FORMAT(cp.wedding_date, '%Y-%m-%d') AS weddingDate,
@@ -931,6 +973,7 @@ app.post('/api/admin/budget-plans/:coupleUserId/generate', requireAuth, requireA
       [insert.insertId, item.category, item.percent, item.targetAmountRwf, item.plannedAmountRwf, item.vendorId,
         item.vendorName, item.verifiedPriceFromRwf, item.vendorEstimateRwf, item.pricingBasis, item.priceSource]);
     }
+    await connection.execute('UPDATE couple_profiles SET budget_status = ? WHERE user_id = ?', ['proposed', coupleUserId]);
     await connection.commit();
     res.status(201).json({ planId: insert.insertId, version, plannedTotalRwf: generated.plannedTotalRwf,
       requestedBudgetRwf: Number(profiles[0].budgetRwf), isOverBudget: generated.isOverBudget,
@@ -990,10 +1033,14 @@ app.put('/api/admin/budget-plans/:id/review', requireAuth, requireAdmin, async (
   const parsed = budgetReviewSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: 'Choose approve or reject for this budget plan.' }); return; }
   try {
+    const [plans] = await pool.query<RowDataPacket[]>('SELECT couple_user_id AS coupleUserId FROM wedding_plans WHERE id = ? AND status = ?', [id, 'proposed']);
+    if (!plans.length) { res.status(404).json({ error: 'Proposed budget plan not found or already reviewed.' }); return; }
     const [result] = await pool.execute<ResultSetHeader>(`UPDATE wedding_plans SET status = ?, review_note = ?,
       reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'proposed'`,
     [parsed.data.status, parsed.data.note || null, req.user!.id, id]);
     if (!result.affectedRows) { res.status(404).json({ error: 'Proposed budget plan not found or already reviewed.' }); return; }
+    await pool.execute('UPDATE couple_profiles SET budget_status = ? WHERE user_id = ? AND budget_status = ?',
+      [parsed.data.status === 'approved' ? 'approved' : 'changes_requested', plans[0].coupleUserId, 'proposed']);
     res.json({ ok: true });
   } catch (error) { next(error); }
 });

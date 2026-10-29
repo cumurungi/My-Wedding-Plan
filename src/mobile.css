@@ -24,12 +24,28 @@
     z-index: 19;
     border: 0;
     background: rgb(24 35 30 / 48%);
+    touch-action: manipulation;
   }
 
   .sidebar {
     z-index: 20;
     overflow-y: auto;
     padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .admin-sidebar {
+    left: 0;
+    z-index: 31;
+  }
+
+  .menu-button,
+  .admin-menu-button,
+  .sidebar nav button {
+    touch-action: manipulation;
   }
 
   .main-area,
