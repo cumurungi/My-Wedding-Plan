@@ -20,10 +20,28 @@ export const packagePlans = [
     description: 'Personalized planning assistance and ongoing coordination.',
     features: ['Everything in Standard', 'Personalized planning assistance', 'Ongoing coordination'],
   },
+  {
+    code: 'event_short',
+    name: 'Short Event Plan',
+    priceRwf: 100_000,
+    description: 'A practical plan and vendor recommendations for a shorter event.',
+    features: ['Event budget allocation', 'Recommended vendors', 'No ongoing coordination'],
+  },
 ] as const;
 
 export const packageCheckoutClaimStorageKey = 'my-wedding-plan-package-claim';
 export type PackageCode = (typeof packagePlans)[number]['code'];
+export type EventType = 'wedding' | 'birthday' | 'bridal_shower' | 'baby_shower' | 'meeting' | 'anniversary' | 'graduation' | 'other';
+export const eventTypeLabels: Record<EventType, string> = {
+  wedding: 'Wedding',
+  birthday: 'Birthday',
+  bridal_shower: 'Bridal shower',
+  baby_shower: 'Baby shower',
+  meeting: 'Meeting',
+  anniversary: 'Anniversary',
+  graduation: 'Graduation',
+  other: 'Other event',
+};
 export type PackageOrderStatus = 'pending' | 'successful' | 'failed';
 export type PackageOrderView = {
   id: number;

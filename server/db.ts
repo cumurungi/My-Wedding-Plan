@@ -28,6 +28,8 @@ export interface UserRow extends RowDataPacket {
 }
 
 export interface CoupleProfileRow extends RowDataPacket {
+  eventType: string;
+  eventName: string | null;
   budgetRwf: number | null;
   guestCount: number | null;
   contactPhone: string | null;
@@ -90,6 +92,8 @@ export async function initializeDatabase(): Promise<void> {
   await ensureProfileColumn('other_costs_description', 'VARCHAR(500) NULL');
   await ensureProfileColumn('wedding_format', "VARCHAR(40) NULL");
   await ensureProfileColumn('vendor_needs', 'TEXT NULL');
+  await ensureProfileColumn('event_type', "VARCHAR(40) NOT NULL DEFAULT 'wedding'");
+  await ensureProfileColumn('event_name', 'VARCHAR(120) NULL');
   await ensureProfileColumn('contact_phone', 'VARCHAR(40) NULL');
   const budgetStatusAdded = await ensureProfileColumn('budget_status', "VARCHAR(30) NOT NULL DEFAULT 'pending'");
   await pool.execute(`
@@ -108,7 +112,7 @@ export async function initializeDatabase(): Promise<void> {
     CREATE TABLE IF NOT EXISTS couple_package_orders (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
       couple_user_id BIGINT UNSIGNED NULL,
-      package_code ENUM('basic','standard','premium') NOT NULL,
+      package_code ENUM('basic','standard','premium','event_short') NOT NULL,
       amount_rwf BIGINT UNSIGNED NOT NULL,
       payment_method ENUM('mtn_momo','bank_transfer') NOT NULL,
       payer_msisdn VARCHAR(20) NULL,
@@ -123,6 +127,7 @@ export async function initializeDatabase(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
   await ensurePackageOrderColumn('payment_method', "ENUM('mtn_momo','bank_transfer') NOT NULL DEFAULT 'mtn_momo'");
+  await ensurePackageOrderColumn('package_code', "ENUM('basic','standard','premium','event_short') NOT NULL");
   await ensurePackageOrderColumn('payer_reference', 'VARCHAR(120) NULL');
   await ensurePackageOrderColumn('payer_msisdn', 'VARCHAR(20) NULL');
   await ensurePackageOrderColumn('claim_secret_hash', 'CHAR(64) NULL');
@@ -390,7 +395,7 @@ export async function initializeDatabase(): Promise<void> {
   }
 }
 
-async function ensureProfileColumn(name: 'style' | 'special_requirements' | 'other_costs_description' | 'wedding_format' | 'vendor_needs' | 'contact_phone' | 'budget_status', definition: string): Promise<boolean> {
+async function ensureProfileColumn(name: 'style' | 'special_requirements' | 'other_costs_description' | 'wedding_format' | 'vendor_needs' | 'contact_phone' | 'budget_status' | 'event_type' | 'event_name', definition: string): Promise<boolean> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
     ['couple_profiles', name],
@@ -426,13 +431,15 @@ async function ensureInspirationColumn(name: 'image_key' | 'image_mime_type' | '
   if (rows.length === 0) await pool.execute(`ALTER TABLE inspiration_items ADD COLUMN ${name} ${definition}`);
 }
 
-async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_reference' | 'payer_msisdn' | 'claim_secret_hash', definition: string): Promise<void> {
+async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_reference' | 'payer_msisdn' | 'claim_secret_hash' | 'package_code', definition: string): Promise<void> {
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT COLUMN_NAME, IS_NULLABLE AS isNullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+    'SELECT COLUMN_NAME, COLUMN_TYPE AS columnType, IS_NULLABLE AS isNullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
     ['couple_package_orders', name],
   );
   if (rows.length === 0) await pool.execute(`ALTER TABLE couple_package_orders ADD COLUMN ${name} ${definition}`);
   else if (name === 'payer_msisdn' && rows[0].isNullable !== 'YES') {
+    await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
+  } else if (name === 'package_code' && !String(rows[0].columnType).includes("'event_short'")) {
     await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
   }
 }

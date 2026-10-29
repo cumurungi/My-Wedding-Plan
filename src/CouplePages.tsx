@@ -61,27 +61,61 @@ export function CoupleChecklistPage() {
   </section>;
 }
 
-export function CoupleInspirationPage() {
+export function CoupleInspirationPage({ publicAccess = false, onJoin }: { publicAccess?: boolean; onJoin?: () => void }) {
   const { t } = useLanguage();
   const [items, setItems] = useState<InspirationItem[]>([]);
   const [vendors, setVendors] = useState<PublicVendor[]>([]);
-  const [activeTab, setActiveTab] = useState<'ideas' | 'vendors'>('vendors');
+  const [activeTab, setActiveTab] = useState<'ideas' | 'vendors'>(publicAccess ? 'ideas' : 'vendors');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   useEffect(() => {
     void Promise.all([
-      fetch('/api/couple/inspiration').then(async (response) => { const data = await readJson<{ items: InspirationItem[] }>(response); if (!response.ok) throw new Error(data.error || 'Could not load inspiration.'); return data.items ?? []; }),
-      fetch('/api/couple/vendors').then(async (response) => { const data = await readJson<{ vendors: PublicVendor[] }>(response); if (!response.ok) throw new Error(data.error || 'Could not load vendors.'); return data.vendors ?? []; }),
+      fetch(publicAccess ? '/api/public/inspiration' : '/api/couple/inspiration').then(async (response) => { const data = await readJson<{ items: InspirationItem[] }>(response); if (!response.ok) throw new Error(data.error || 'Could not load inspiration.'); return data.items ?? []; }),
+      publicAccess ? Promise.resolve([] as PublicVendor[]) : fetch('/api/couple/vendors').then(async (response) => { const data = await readJson<{ vendors: PublicVendor[] }>(response); if (!response.ok) throw new Error(data.error || 'Could not load vendors.'); return data.vendors ?? []; }),
     ]).then(([inspirationItems, vendorItems]) => { setItems(inspirationItems); setVendors(vendorItems); })
       .catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load inspiration and vendors.')).finally(() => setLoading(false));
-  }, []);
+  }, [publicAccess]);
   const removedBudgetCategories = new Set(['Attire', 'Ceremony & Church Services', 'Accommodation & Honeymoon']);
   const categories = [...new Set(['Venue', 'Catering', 'Decoration', 'Florist & Flowers', 'Photography & Video', 'Hair Stylist', 'Transport', 'Cake', 'Traditional Dancers', 'Wedding Services & Protocol', 'Sound System', 'Music Band', 'DJ', 'MC', 'Drinks & Beverage Service', 'Lighting, Screens & Stage', 'Rings, Gifts & Souvenirs', 'Stationery & Invitations', ...vendors.map((vendor) => vendor.category), ...items.map((item) => item.vendorCategory).filter((category): category is string => Boolean(category))].filter((category) => !removedBudgetCategories.has(category)))].sort((a, b) => a.localeCompare(b));
   const categoryItems = selectedCategory ? items.filter((item) => item.vendorCategory === selectedCategory || (!item.vendorCategory && selectedCategory === 'Decoration')) : [];
-  return <section className="couple-page-panel couple-inspiration-page"><header className="couple-page-heading"><div><span className="eyebrow">{t('IDEAS FOR YOUR CELEBRATION')}</span><h2>{t('Inspiration')}</h2><p>{t('Browse the examples your planning team has prepared for each service.')}</p></div><Sparkles size={22} /></header>
-    <nav className="couple-inspiration-tabs"><button className={activeTab === 'vendors' ? 'active' : ''} onClick={() => setActiveTab('vendors')}><Store size={14} /> {t('Vendor categories')} <span>{categories.length}</span></button><button className={activeTab === 'ideas' ? 'active' : ''} onClick={() => setActiveTab('ideas')}><Lightbulb size={14} /> {t('Wedding ideas')}</button></nav>
+  function renderIdeaCards(entries: InspirationItem[], showDetails: boolean) {
+    return <div className="couple-inspiration-grid">{entries.map((item) => <article key={item.id}>
+      <div className="couple-inspiration-image">{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={25} /><span>{item.vendorCategory || t(inspirationType[item.itemType])}</span></div>}
+        {item.colorPalette && <div className="couple-inspiration-swatches">{item.colorPalette.split(',').map((color) => color.trim()).filter(Boolean).map((color) => <i key={color} style={{ backgroundColor: color }} />)}</div>}
+      </div>
+      <div className="couple-inspiration-copy"><small>{showDetails && item.vendorCategory ? item.vendorCategory : t(inspirationType[item.itemType])}{showDetails && item.priceRwf != null ? ` · ${Number(item.priceRwf).toLocaleString()} RWF` : ''}</small><h3>{item.title}</h3><p>{item.description}</p></div>
+    </article>)}</div>;
+  }
+  let inspirationContent;
+  if (loading) inspirationContent = <p className="couple-page-empty">{t('Loading inspiration…')}</p>;
+  else if (publicAccess) inspirationContent = items.length
+    ? renderIdeaCards(items, true)
+    : <p className="couple-page-empty">{t('Our celebration inspiration is being prepared. Check back soon.')}</p>;
+  else if (activeTab === 'ideas') inspirationContent = items.filter((item) => !item.vendorCategory).length
+    ? renderIdeaCards(items.filter((item) => !item.vendorCategory), false)
+    : <p className="couple-page-empty">{t('Your planning team will share wedding ideas here.')}</p>;
+  else if (selectedCategory) inspirationContent = <><div className="couple-vendor-category-heading"><button onClick={() => setSelectedCategory(null)}>← {t('All categories')}</button><div><h3>{selectedCategory} inspiration</h3><span>{categoryItems.length} {t(categoryItems.length === 1 ? 'example' : 'examples')}</span></div></div>
+    {categoryItems.length ? <div className="couple-vendor-gallery">{categoryItems.map((item) => <article className="couple-vendor-card" key={item.id}>
+      <div className="couple-vendor-photo">{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={28} /><span>{t('Inspiration photo coming soon')}</span></div>}</div>
+      <div className="couple-vendor-info"><small>{item.vendorCategory}</small><h3>{item.title}</h3><p>{item.description || t('An example selected by your planning team.')}</p>
+        {item.colorPalette && <div className="couple-vendor-palette"><span><Palette size={13} /> {t('Colors')}</span><div>{item.colorPalette.split(',').map((color) => color.trim()).filter(Boolean).map((color) => <i key={color} title={color} style={{ backgroundColor: color }} />)}</div><small>{item.colorPalette}</small></div>}
+        {item.priceRwf != null && <div className="couple-vendor-price"><CircleDollarSign size={15} /><b>{Number(item.priceRwf).toLocaleString()} RWF</b></div>}
+      </div>
+    </article>)}</div> : <p className="couple-page-empty">{t('Your planning team has not added examples for this category yet.')}</p>}</>;
+  else inspirationContent = <div className="couple-vendor-category-grid">{categories.map((category) => {
+    const group = items.filter((item) => item.vendorCategory === category || (!item.vendorCategory && category === 'Decoration'));
+    const cover = group.find((item) => item.imageUrl);
+    return <button className="couple-vendor-category-card" key={category} onClick={() => setSelectedCategory(category)}>
+      <div>{cover?.imageUrl ? <img src={cover.imageUrl} alt="" loading="lazy" /> : <Store size={30} />}<span>{group.length ? `${group.length} ${t(group.length === 1 ? 'example' : 'examples')}` : t('Coming soon')}</span></div>
+      <h3>{category}</h3><small>{t('View inspiration boards')} <span>→</span></small>
+    </button>;
+  })}</div>;
+  return <section className="couple-page-panel couple-inspiration-page">
+    <header className="couple-page-heading"><div><span className="eyebrow">{t('IDEAS FOR YOUR CELEBRATION')}</span><h2>{t('Inspiration')}</h2><p>{t(publicAccess ? 'Explore ideas and celebration examples, no account needed.' : 'Browse the examples your planning team has prepared for each service.')}</p></div><Sparkles size={22} /></header>
+    {!publicAccess && <nav className="couple-inspiration-tabs"><button className={activeTab === 'vendors' ? 'active' : ''} onClick={() => setActiveTab('vendors')}><Store size={14} /> {t('Vendor categories')} <span>{categories.length}</span></button><button className={activeTab === 'ideas' ? 'active' : ''} onClick={() => setActiveTab('ideas')}><Lightbulb size={14} /> {t('Wedding ideas')}</button></nav>}
     {error && <p className="couple-page-error">{error}</p>}
-    {loading ? <p className="couple-page-empty">{t('Loading inspiration…')}</p> : activeTab === 'ideas' ? items.filter((item) => !item.vendorCategory).length ? <div className="couple-inspiration-grid">{items.filter((item) => !item.vendorCategory).map((item) => <article key={item.id}><div className="couple-inspiration-image">{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={25} /><span>{t(inspirationType[item.itemType])}</span></div>}{item.colorPalette && <div className="couple-inspiration-swatches">{item.colorPalette.split(',').map((color) => color.trim()).filter(Boolean).map((color) => <i key={color} style={{ backgroundColor: color }} />)}</div>}</div><div className="couple-inspiration-copy"><small>{t(inspirationType[item.itemType])}</small><h3>{item.title}</h3><p>{item.description}</p></div></article>)}</div> : <p className="couple-page-empty">{t('Your planning team will share wedding ideas here.')}</p> : selectedCategory ? <><div className="couple-vendor-category-heading"><button onClick={() => setSelectedCategory(null)}>← {t('All categories')}</button><div><h3>{selectedCategory} inspiration</h3><span>{categoryItems.length} {t(categoryItems.length === 1 ? 'example' : 'examples')}</span></div></div>{categoryItems.length ? <div className="couple-vendor-gallery">{categoryItems.map((item) => <article className="couple-vendor-card" key={item.id}><div className="couple-vendor-photo">{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={28} /><span>{t('Inspiration photo coming soon')}</span></div>}</div><div className="couple-vendor-info"><small>{item.vendorCategory}</small><h3>{item.title}</h3><p>{item.description || t('An example selected by your planning team.')}</p>{item.colorPalette && <div className="couple-vendor-palette"><span><Palette size={13} /> {t('Colors')}</span><div>{item.colorPalette.split(',').map((color) => color.trim()).filter(Boolean).map((color) => <i key={color} title={color} style={{ backgroundColor: color }} />)}</div><small>{item.colorPalette}</small></div>}{item.priceRwf != null && <div className="couple-vendor-price"><CircleDollarSign size={15} /><b>{Number(item.priceRwf).toLocaleString()} RWF</b></div>}</div></article>)}</div> : <p className="couple-page-empty">{t('Your planning team has not added examples for this category yet.')}</p>}</> : <div className="couple-vendor-category-grid">{categories.map((category) => { const group = items.filter((item) => item.vendorCategory === category || (!item.vendorCategory && category === 'Decoration')); const cover = group.find((item) => item.imageUrl); return <button className="couple-vendor-category-card" key={category} onClick={() => setSelectedCategory(category)}><div>{cover?.imageUrl ? <img src={cover.imageUrl} alt="" loading="lazy" /> : <Store size={30} />}<span>{group.length ? `${group.length} ${t(group.length === 1 ? 'example' : 'examples')}` : t('Coming soon')}</span></div><h3>{category}</h3><small>{t('View inspiration boards')} <span>→</span></small></button>; })}</div>}
+    {inspirationContent}
+    {publicAccess && onJoin && <div className="public-inspiration-cta"><div><b>{t('Ready to plan your own event?')}</b><p>{t('Choose a package and create your account to get started.')}</p></div><button className="admin-primary" type="button" onClick={onJoin}>{t('Create an account')}</button></div>}
   </section>;
 }

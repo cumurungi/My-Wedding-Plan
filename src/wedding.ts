@@ -1,6 +1,8 @@
 export type User = { id: number; name: string; email: string; role: 'couple' | 'admin' };
 
 export type WeddingProfile = {
+  eventType?: 'wedding' | 'birthday' | 'bridal_shower' | 'baby_shower' | 'meeting' | 'anniversary' | 'graduation' | 'other' | null;
+  eventName?: string | null;
   budgetRwf?: number | null;
   guestCount?: number | null;
   contactPhone?: string | null;
@@ -15,6 +17,8 @@ export type WeddingProfile = {
 };
 
 export type WeddingDetails = {
+  eventType: NonNullable<WeddingProfile['eventType']>;
+  eventName: string;
   budgetRwf: number;
   guestCount: number;
   contactPhone: string;

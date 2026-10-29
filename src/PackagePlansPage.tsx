@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Check, Crown, Heart, LoaderCircle, ShieldCheck, Sparkles } from 'lucide-react';
+import { Check, Crown, Heart, LoaderCircle, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { packageCheckoutClaimStorageKey, packagePlans, type CouplePackageView, type PackageCode, type PackageOrderView } from '../shared/package-plans';
 import type { User } from './wedding';
 
@@ -21,6 +21,7 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
   const [paymentMethod, setPaymentMethod] = useState<'mtn_momo' | 'bank_transfer'>('mtn_momo');
   const [transferReference, setTransferReference] = useState('');
   const [selectedPackage, setSelectedPackage] = useState<PackageCode>(getInitialPackage);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const completedOrder = useRef<number | null>(null);
@@ -47,11 +48,12 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
             sessionStorage.removeItem(packageCheckoutClaimStorageKey);
           } else {
             setAccess((current) => current ? { ...current, pendingOrder: order } : current);
+            setCheckoutOpen(true);
             setPaymentMethod(order.paymentMethod);
             setSelectedPackage(order.code);
             if (order.phone) setPhone(order.phone);
             if (order.payerReference) setTransferReference(order.payerReference);
-            if (order.status === 'successful') onAuth('login');
+            if (order.status === 'successful') onAuth('register');
           }
         } else if (statusResponse.status === 404) sessionStorage.removeItem(packageCheckoutClaimStorageKey);
       } catch {
@@ -70,6 +72,15 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
     void loadAccess().catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load packages.'));
   }, [loadAccess, user]);
 
+  useEffect(() => {
+    if (!checkoutOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setCheckoutOpen(false);
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [checkoutOpen]);
+
   const checkPayment = useCallback(async (order: CheckoutOrder) => {
     const guestCheckout = !user && Boolean(order.claimToken);
     const response = await fetch(guestCheckout ? `/api/package-checkout/${order.id}/status` : `/api/couple/package-orders/${order.id}`, guestCheckout ? {
@@ -82,7 +93,7 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
     const updatedOrder: PackageOrderView = { ...order, ...data };
     if (updatedOrder.status === 'successful') {
       if (guestCheckout) {
-        onAuth('login');
+        onAuth('register');
         return;
       }
       setAccess((current) => current ? { ...current, activePackage: updatedOrder, pendingOrder: null } : current);
@@ -145,6 +156,7 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
           ...(paymentMethod === 'mtn_momo' ? { phone } : {}),
         },
       } : current);
+      setCheckoutOpen(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not start your payment.');
     } finally { setBusy(false); }
@@ -171,7 +183,7 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
       setAccess((current) => current?.pendingOrder
         ? { ...current, pendingOrder: { ...current.pendingOrder, payerReference: transferReference.trim() } }
         : current);
-      if (guestCheckout) onAuth('login');
+      if (guestCheckout) onAuth('register');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not submit the bank transfer reference.');
     } finally { setBusy(false); }
@@ -182,31 +194,40 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
   return <section className="package-page">
     <header className="package-page-heading">
       <span className="eyebrow">PLANNING THAT FITS YOUR NEEDS</span>
-      <h2>Choose your wedding planning package</h2>
+      <h2>Choose a plan for your event</h2>
       <p>Packages are paid once. We begin your selected planning service after your payment has been confirmed.</p>
     </header>
     {access?.activePackage && <div className="package-active" role="status">
       <ShieldCheck size={18} />
       <span><b>{access.activePackage.name} active</b><small>Your package payment has been confirmed.</small></span>
     </div>}
+    {pendingOrder && <div className="package-pending package-pending-summary" role="status"><LoaderCircle size={18} className={pendingOrder.paymentMethod === 'mtn_momo' ? 'package-spinner' : undefined} /><span><b>{pendingOrder.paymentMethod === 'bank_transfer' ? 'Bank transfer awaiting review' : 'Payment awaiting approval'}</b><small>{pendingOrder.paymentMethod === 'bank_transfer' ? 'Your package stays locked until our team verifies your transfer.' : `We’re checking the payment status for ${pendingOrder.name}.`}</small></span><button type="button" onClick={() => setCheckoutOpen(true)}>View payment</button></div>}
     <div className="package-cards">
       {packagePlans.map((plan, index) => <article className={`package-card ${plan.code === selectedPackage ? 'selected' : ''} ${plan.code === 'premium' ? 'featured' : ''}`} key={plan.code}>
         <div className="package-card-title"><span>{index === 2 ? <Crown size={18} /> : index === 1 ? <Sparkles size={18} /> : <Heart size={18} />}</span><h3>{plan.name}</h3></div>
         <p>{plan.description}</p>
         <strong className="package-price">{formatPrice(plan.priceRwf)}<small> one-time</small></strong>
         <ul>{plan.features.map((feature) => <li key={feature}><Check size={15} />{feature}</li>)}</ul>
-        <button className="package-select" type="button" aria-pressed={selectedPackage === plan.code} onClick={() => {
+        <button className="package-select" type="button" disabled={Boolean(pendingOrder || access?.activePackage)} aria-pressed={selectedPackage === plan.code} onClick={() => {
           setSelectedPackage(plan.code);
           sessionStorage.setItem(selectedPackageKey, plan.code);
+          setError('');
+          setCheckoutOpen(true);
         }}>
-          {access?.activePackage?.code === plan.code ? 'Your active package' : selectedPackage === plan.code ? 'Selected' : `Choose ${plan.name}`}
+          {access?.activePackage?.code === plan.code ? 'Your active package' : `Choose ${plan.name}`}
         </button>
       </article>)}
     </div>
+    {checkoutOpen && <div className="package-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pendingOrder) setCheckoutOpen(false); }}>
+    <section className="package-checkout-modal" role="dialog" aria-modal="true" aria-labelledby="package-checkout-title">
+    <header className="package-checkout-modal-heading">
+      <div><span className="eyebrow">SECURE CHECKOUT</span><h2 id="package-checkout-title">{packagePlans.find((item) => item.code === selectedPackage)?.name} · {formatPrice(packagePlans.find((item) => item.code === selectedPackage)?.priceRwf ?? 0)}</h2></div>
+      <button className="package-modal-close" type="button" onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={19} /></button>
+    </header>
     <form className="package-checkout" onSubmit={(event) => void startPayment(event)}>
       <div className="package-checkout-copy">
         <h3>{user ? 'Choose how to pay' : 'Pay first, then set up your account'}</h3>
-        <p>{user ? 'Bank transfers are verified by our team.' : 'Choose a package and pay. After payment, sign in or create an account to provide your wedding details.'}</p>
+        <p>{user ? 'Bank transfers are verified by our team.' : 'Choose a package and pay. After payment, sign in or create an account to provide your event details.'}</p>
       </div>
       {!pendingOrder && !access?.activePackage && <fieldset className="package-methods">
         <legend>Payment method</legend>
@@ -231,7 +252,9 @@ export default function PackagePlansPage({ user, onAuth, onPaid }: {
       {error && <p className="package-error" role="alert">{error}</p>}
       {pendingOrder && <button type="button" className="package-refresh" disabled={busy} onClick={() => { setBusy(true); void checkPayment(pendingOrder).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not check the payment status.')).finally(() => setBusy(false)); }}>{busy ? 'Checking…' : 'Check payment status'}</button>}
       {!pendingOrder && !access?.activePackage && <button type="submit" className="package-pay" disabled={busy || (paymentMethod === 'mtn_momo' ? !access?.paymentMethods.mtnMomo : !bankTransfer)}>{busy ? <><LoaderCircle size={16} className="package-spinner" /> Starting payment…</> : `Continue with ${formatPrice(packagePlans.find((item) => item.code === selectedPackage)?.priceRwf ?? 0)}`}</button>}
-      <small className="package-checkout-note">After MTN confirms payment, you’ll go to sign in or create an account. Bank transfers are activated after our team verifies them. Never share your online banking password or PIN.</small>
+      <small className="package-checkout-note">After your payment is confirmed, you’ll create an account to access your event plan. Bank transfers are activated after our team verifies them. Never share your online banking password or PIN.</small>
     </form>
+    </section>
+    </div>}
   </section>;
 }

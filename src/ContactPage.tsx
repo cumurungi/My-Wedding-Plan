@@ -27,7 +27,7 @@ export default function ContactPage({ user }: { user: User | null }) {
   }
 
   return <section className="couple-page-panel contact-page">
-    <header className="couple-page-heading"><div><span className="eyebrow">WE’RE HERE TO HELP</span><h2>Contact us</h2><p>Questions about your wedding plans? Send our team a message and we’ll get back to you.</p></div><MessageSquare size={22} /></header>
+    <header className="couple-page-heading"><div><span className="eyebrow">WE’RE HERE TO HELP</span><h2>Contact us</h2><p>Questions about your event plans? Send our team a message and we’ll get back to you.</p></div><MessageSquare size={22} /></header>
     <ContactDetails />
     {sent ? <div className="contact-success" role="status">Your message has been sent. Thank you for contacting us.</div> : <form className="contact-form" onSubmit={submit}>
       <label>Your name<input name="name" minLength={2} maxLength={80} autoComplete="name" defaultValue={user?.name ?? ''} required /></label>

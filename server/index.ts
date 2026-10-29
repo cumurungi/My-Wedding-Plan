@@ -54,6 +54,8 @@ const registerSchema = z.object({
 });
 const loginSchema = z.object({ email: z.string().trim().email(), password: z.string().min(1).max(128) });
 const weddingDetailsSchema = z.object({
+  eventType: z.enum(['wedding', 'birthday', 'bridal_shower', 'baby_shower', 'meeting', 'anniversary', 'graduation', 'other']),
+  eventName: z.string().trim().max(120).default(''),
   budgetRwf: z.coerce.number().int().min(1).max(10_000_000_000_000),
   guestCount: z.coerce.number().int().min(1).max(100_000),
   contactPhone: z.string().trim().max(40).default(''),
@@ -62,13 +64,17 @@ const weddingDetailsSchema = z.object({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const date = new Date(`${value}T00:00:00.000Z`);
     return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-  }, 'Enter a valid wedding date.'),
+  }, 'Enter a valid event date.'),
   location: z.string().trim().min(2).max(160),
   style: z.string().trim().max(100).default(''),
   weddingFormat: z.enum(['traditional_church_reception', 'church_reception', 'traditional_only', 'other']).default('other'),
   vendorNeeds: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
   specialRequirements: z.string().trim().max(5000).default(''),
   otherCostsDescription: z.string().trim().max(500).default(''),
+}).superRefine((details, context) => {
+  if (details.eventType === 'other' && !details.eventName) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['eventName'], message: 'Enter the name of your event.' });
+  }
 });
 const contactMessageSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -77,12 +83,12 @@ const contactMessageSchema = z.object({
   message: z.string().trim().min(10).max(5000),
 });
 const packageOrderSchema = z.object({
-  packageCode: z.enum(['basic', 'standard', 'premium']),
+  packageCode: z.enum(['basic', 'standard', 'premium', 'event_short']),
   paymentMethod: z.enum(['mtn_momo', 'bank_transfer']),
   phone: z.string().trim().max(20).optional(),
 });
 const publicPackageOrderSchema = z.object({
-  packageCode: z.enum(['basic', 'standard', 'premium']),
+  packageCode: z.enum(['basic', 'standard', 'premium', 'event_short']),
   paymentMethod: z.enum(['mtn_momo', 'bank_transfer']),
   phone: z.string().trim().max(20).optional(),
 });
@@ -97,20 +103,29 @@ function parseVendorNeeds(value: string | null): string[] {
 }
 const vendorCategoriesForNeed: Record<string, string[]> = {
   'Venue': ['Venue'],
+  'Venue or meeting room': ['Venue'],
   'Catering': ['Catering'],
+  'Catering or refreshments': ['Catering'],
   'Photography & video': ['Photography & Video'],
+  'Decoration': ['Decoration'],
+  'Decoration, tables, chairs & tents': ['Decoration'],
   'Decorator (includes tables, chairs & tents)': ['Decoration'],
   'Florist': ['Florist & Flowers'],
+  'Flowers': ['Florist & Flowers'],
   'Wedding attire': ['Decoration'],
   'Makeup & hair': ['Makeup Artist', 'Hair Stylist'],
   'Transport': ['Transport'],
   'Cake': ['Cake'],
+  'Sound system or music': ['Sound System', 'Music Band', 'DJ'],
+  'MC or facilitator': ['MC'],
   'Music & entertainment': ['Sound System', 'Music Band', 'DJ', 'MC'],
+  'Drinks': ['Drinks & Beverage Service'],
   'Drinks & beverages': ['Drinks & Beverage Service'],
   'Church services': ['Other Costs'],
   'Traditional dancers / Itorero': ['Traditional Dancers'],
   'Wedding services & protocol': ['Wedding Services & Protocol'],
   'Stationery & invitations': ['Stationery & Invitations'],
+  'Invitations or stationery': ['Stationery & Invitations'],
   'Accommodation': ['Other Costs'],
   'Other': ['Other Costs'],
 };
@@ -1050,7 +1065,7 @@ app.get('/api/couple/profile', requireAuth, requireActivePackage, async (req, re
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   try {
     const [rows] = await pool.query<import('./db.js').CoupleProfileRow[]>(
-      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
+      'SELECT event_type AS eventType, event_name AS eventName, budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
       [req.user.id],
     );
     res.json({ profile: rows[0] ? { ...rows[0], vendorNeeds: parseVendorNeeds(rows[0].vendorNeeds) } : null });
@@ -1066,21 +1081,31 @@ app.get('/api/couple/vendor-recommendations', requireAuth, requireActivePackage,
 app.put('/api/couple/profile', requireAuth, requireActivePackage, async (req, res, next) => {
   if (req.user?.role !== 'couple') { res.status(403).json({ error: 'Couple access required.' }); return; }
   const parsed = weddingDetailsSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your wedding details.' }); return; }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check your event details.' }); return; }
   const details = parsed.data;
+  const [orders] = await pool.query<RowDataPacket[]>(
+    "SELECT package_code AS packageCode FROM couple_package_orders WHERE couple_user_id = ? AND status = 'successful' ORDER BY paid_at DESC LIMIT 1",
+    [req.user.id],
+  );
+  const isShortEventPlan = orders[0]?.packageCode === 'event_short';
+  if ((isShortEventPlan && details.eventType === 'wedding') || (!isShortEventPlan && details.eventType !== 'wedding')) {
+    res.status(400).json({ error: isShortEventPlan ? 'The Short Event Plan is for non-wedding events.' : 'Please choose a wedding event for your selected wedding package.' });
+    return;
+  }
   try {
     await pool.execute(
-      `INSERT INTO couple_profiles (user_id, budget_rwf, guest_count, contact_phone, budget_status, wedding_date, location, style, special_requirements, other_costs_description, wedding_format, vendor_needs)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE budget_rwf = VALUES(budget_rwf), guest_count = VALUES(guest_count),
+      `INSERT INTO couple_profiles (user_id, event_type, event_name, budget_rwf, guest_count, contact_phone, budget_status, wedding_date, location, style, special_requirements, other_costs_description, wedding_format, vendor_needs)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE event_type = VALUES(event_type), event_name = VALUES(event_name),
+       budget_rwf = VALUES(budget_rwf), guest_count = VALUES(guest_count),
        contact_phone = VALUES(contact_phone), budget_status = 'pending',
        wedding_date = VALUES(wedding_date), location = VALUES(location), style = VALUES(style),
        special_requirements = VALUES(special_requirements), other_costs_description = VALUES(other_costs_description),
        wedding_format = VALUES(wedding_format), vendor_needs = VALUES(vendor_needs)`,
-      [req.user.id, details.budgetRwf, details.guestCount, details.contactPhone || null, details.weddingDate || null, details.location, details.style || null, details.specialRequirements || null, details.otherCostsDescription || null, details.weddingFormat, JSON.stringify(details.vendorNeeds)],
+      [req.user.id, details.eventType, details.eventName || null, details.budgetRwf, details.guestCount, details.contactPhone || null, details.weddingDate || null, details.location, details.style || null, details.specialRequirements || null, details.otherCostsDescription || null, details.weddingFormat, JSON.stringify(details.vendorNeeds)],
     );
     const [rows] = await pool.query<import('./db.js').CoupleProfileRow[]>(
-      'SELECT budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
+      'SELECT event_type AS eventType, event_name AS eventName, budget_rwf AS budgetRwf, guest_count AS guestCount, contact_phone AS contactPhone, budget_status AS budgetStatus, DATE_FORMAT(wedding_date, \'%Y-%m-%d\') AS weddingDate, location, style, special_requirements AS specialRequirements, other_costs_description AS otherCostsDescription, wedding_format AS weddingFormat, vendor_needs AS vendorNeeds FROM couple_profiles WHERE user_id = ?',
       [req.user.id],
     );
     res.json({ profile: rows[0] ? { ...rows[0], vendorNeeds: parseVendorNeeds(rows[0].vendorNeeds) } : null });
@@ -1159,9 +1184,13 @@ app.get('/api/admin/notifications', requireAuth, requireAdmin, async (_req, res,
 app.get('/api/admin/couples', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT u.id, u.name, u.email, cp.guest_count AS guestCount, cp.budget_rwf AS budgetRwf,
+      `SELECT u.id, u.name, u.email, cp.event_type AS eventType, cp.event_name AS eventName,
+        cp.guest_count AS guestCount, cp.budget_rwf AS budgetRwf,
         DATE_FORMAT(cp.wedding_date, '%Y-%m-%d') AS weddingDate, cp.location, cp.style,
         cp.special_requirements AS specialRequirements, cp.vendor_needs AS vendorNeeds,
+        (SELECT paid.package_code FROM couple_package_orders paid
+          WHERE paid.couple_user_id = u.id AND paid.status IN ('pending','successful')
+          ORDER BY paid.created_at DESC LIMIT 1) AS packageCode,
         cp.user_id IS NOT NULL AS hasWeddingDetails
        FROM users u LEFT JOIN couple_profiles cp ON cp.user_id = u.id
        WHERE u.role = 'couple' ORDER BY u.name, u.email`,
@@ -1175,7 +1204,8 @@ app.get('/api/admin/couples/:id/vendor-checklist', requireAuth, requireAdmin, as
   if (coupleUserId === null) return;
   try {
     const [[couples], tasks] = await Promise.all([
-      pool.query<RowDataPacket[]>(`SELECT u.id, u.name, u.email, cp.guest_count AS guestCount, cp.budget_rwf AS budgetRwf,
+      pool.query<RowDataPacket[]>(`SELECT u.id, u.name, u.email, cp.event_type AS eventType, cp.event_name AS eventName,
+        cp.guest_count AS guestCount, cp.budget_rwf AS budgetRwf,
         DATE_FORMAT(cp.wedding_date, '%Y-%m-%d') AS weddingDate, cp.location, cp.style,
         cp.wedding_format AS weddingFormat, cp.special_requirements AS specialRequirements,
         cp.other_costs_description AS otherCostsDescription
@@ -1235,6 +1265,27 @@ app.get('/api/admin/inspiration', requireAuth, requireAdmin, async (_req, res, n
       (is_published = 1) AS isPublished, created_at AS createdAt, updated_at AS updatedAt
       FROM inspiration_items ORDER BY updated_at DESC, id DESC`);
     res.json({ items });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/public/inspiration', async (_req, res, next) => {
+  try {
+    const [items] = await pool.query<RowDataPacket[]>(`SELECT id, title, item_type AS itemType, vendor_category AS vendorCategory, description, price_rwf AS priceRwf,
+      color_palette AS colorPalette, CASE WHEN image_key IS NOT NULL THEN CONCAT('/api/public/inspiration/', id, '/image') ELSE image_url END AS imageUrl,
+      updated_at AS updatedAt FROM inspiration_items WHERE is_published = 1 ORDER BY updated_at DESC, id DESC`);
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.json({ items });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/public/inspiration/:id/image', async (req, res, next) => {
+  const id = readResourceId(req.params.id, res, 'inspiration item');
+  if (id === null) return;
+  try {
+    const [rows] = await pool.query<RowDataPacket[]>('SELECT image_key AS imageKey, image_mime_type AS imageMimeType FROM inspiration_items WHERE id = ? AND is_published = 1 AND image_key IS NOT NULL', [id]);
+    if (!rows.length) { res.status(404).end(); return; }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    sendInspirationImage(res, rows[0].imageKey, rows[0].imageMimeType);
   } catch (error) { next(error); }
 });
 
@@ -1391,9 +1442,10 @@ app.get('/api/admin/budget-plans', requireAuth, requireAdmin, async (_req, res, 
     const [rows] = await pool.query<RowDataPacket[]>(`SELECT u.id AS coupleUserId, u.name AS coupleName, u.email AS coupleEmail,
       (SELECT paid.package_code FROM couple_package_orders paid WHERE paid.couple_user_id = u.id AND paid.status = 'successful'
         ORDER BY paid.paid_at DESC LIMIT 1) AS paidPackageCode,
+      cp.event_type AS eventType, cp.event_name AS eventName,
       cp.budget_rwf AS requestedBudgetRwf, cp.guest_count AS guestCount, cp.location,
       cp.contact_phone AS contactPhone, cp.budget_status AS budgetStatus,
-      cp.wedding_format AS weddingFormat, cp.vendor_needs AS vendorNeeds,
+      cp.event_type AS eventType, cp.event_name AS eventName, cp.wedding_format AS weddingFormat, cp.vendor_needs AS vendorNeeds,
       cp.other_costs_description AS otherCostsDescription,
       DATE_FORMAT(cp.wedding_date, '%Y-%m-%d') AS weddingDate,
       DATE_FORMAT(cp.created_at, '%Y-%m-%d') AS requestDate,
