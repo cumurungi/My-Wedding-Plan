@@ -1,0 +1,89 @@
+.auth-back-button {
+  position: absolute;
+  top: 24px;
+  left: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #eeeae3;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #fffefa;
+  color: #565850;
+  font-size: 13px;
+}
+
+.auth-back-button:hover {
+  background: #f8f4ec;
+}
+
+.couple-notifications {
+  position: absolute;
+  z-index: 20;
+  top: 54px;
+  right: 24px;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid #eeeae3;
+  border-radius: 14px;
+  background: #fffefa;
+  box-shadow: 0 16px 40px #20252220;
+  color: #202522;
+}
+
+.couple-notifications > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eeeae3;
+}
+
+.couple-notifications > header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+}
+
+.couple-notifications > p {
+  margin: 0;
+  padding: 18px 16px;
+  color: #73756e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.couple-notifications ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.couple-notifications li button {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.couple-notifications li button:hover {
+  background: #f8f4ec;
+}
+
+.couple-notifications li small {
+  color: #73756e;
+}
+
+@media (max-width: 600px) {
+  .auth-back-button {
+    top: 16px;
+    left: 14px;
+    padding: 8px 11px;
+  }
+}
