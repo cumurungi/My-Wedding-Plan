@@ -3,22 +3,22 @@ export const packagePlans = [
     code: 'basic',
     name: 'Basic Plan',
     priceRwf: 200_000,
-    description: 'Budget allocation and recommended vendors.',
-    features: ['Budget allocation', 'Recommended vendors'],
+    description: 'Budget allocation, recommended vendors, and the option to request vendor changes.',
+    features: ['Budget allocation', 'Recommended vendors', 'Request vendor changes'],
   },
   {
     code: 'standard',
     name: 'Standard Plan',
     priceRwf: 400_000,
-    description: 'A complete budget with vendor recommendations and personalized adjustments.',
-    features: ['Everything in Basic', 'Personalized budget adjustments'],
+    description: 'Everything in Basic, with our team contacting vendors on your behalf.',
+    features: ['Everything in Basic', 'Personalized budget adjustments', 'Our team contacts vendors on your behalf'],
   },
   {
     code: 'premium',
     name: 'Premium Plan',
     priceRwf: 1_000_000,
-    description: 'Personalized planning assistance and ongoing coordination.',
-    features: ['Everything in Standard', 'Personalized planning assistance', 'Ongoing coordination'],
+    description: 'Everything in Standard, plus ongoing coordination.',
+    features: ['Everything in Standard', 'Ongoing coordination'],
   },
   {
     code: 'event_short',
@@ -49,6 +49,7 @@ export type PackageOrderView = {
   name: string;
   priceRwf: number;
   status: PackageOrderStatus;
+  paymentStage?: 'deposit' | 'balance';
   paymentMethod: 'mtn_momo' | 'bank_transfer';
   phone?: string;
   payerReference?: string | null;
@@ -59,16 +60,24 @@ export type BankTransferDetails = {
   accountNumber: string;
   branch: string | null;
 };
+export type ManualMomoDetails = {
+  phone: string;
+  accountName: string;
+};
 export type CouplePackageView = {
   plans: typeof packagePlans;
-  activePackage: PackageOrderView | null;
+  activePackage: (PackageOrderView & { paidRwf: number; balanceRwf: number; balanceAvailable: boolean }) | null;
   pendingOrder: PackageOrderView | null;
   paymentMethods: {
-    mtnMomo: boolean;
+    mtnMomo: ManualMomoDetails | null;
     bankTransfer: BankTransferDetails | null;
   };
 };
 
 export function getPackagePlan(code: string) {
   return packagePlans.find((plan) => plan.code === code);
+}
+
+export function packageIncludesClientWorkspaceTools(code: string | null | undefined): boolean {
+  return code === 'standard' || code === 'premium';
 }

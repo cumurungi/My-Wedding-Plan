@@ -61,7 +61,7 @@ export function CoupleChecklistPage() {
   </section>;
 }
 
-export function CoupleInspirationPage({ publicAccess = false, onJoin }: { publicAccess?: boolean; onJoin?: () => void }) {
+export function CoupleInspirationPage({ publicAccess = false, onViewPackages }: { publicAccess?: boolean; onViewPackages?: () => void }) {
   const { t } = useLanguage();
   const [items, setItems] = useState<InspirationItem[]>([]);
   const [vendors, setVendors] = useState<PublicVendor[]>([]);
@@ -116,6 +116,6 @@ export function CoupleInspirationPage({ publicAccess = false, onJoin }: { public
     {!publicAccess && <nav className="couple-inspiration-tabs"><button className={activeTab === 'vendors' ? 'active' : ''} onClick={() => setActiveTab('vendors')}><Store size={14} /> {t('Vendor categories')} <span>{categories.length}</span></button><button className={activeTab === 'ideas' ? 'active' : ''} onClick={() => setActiveTab('ideas')}><Lightbulb size={14} /> {t('Wedding ideas')}</button></nav>}
     {error && <p className="couple-page-error">{error}</p>}
     {inspirationContent}
-    {publicAccess && onJoin && <div className="public-inspiration-cta"><div><b>{t('Ready to plan your own event?')}</b><p>{t('Choose a package and create your account to get started.')}</p></div><button className="admin-primary" type="button" onClick={onJoin}>{t('Create an account')}</button></div>}
+    {publicAccess && onViewPackages && <div className="public-inspiration-cta"><div><b>{t('Ready to plan your own event?')}</b><p>{t('Choose a package and complete payment to start planning.')}</p></div><button className="admin-primary" type="button" onClick={onViewPackages}>{t('View packages')}</button></div>}
   </section>;
 }

@@ -114,6 +114,7 @@ export async function initializeDatabase(): Promise<void> {
       couple_user_id BIGINT UNSIGNED NULL,
       package_code ENUM('basic','standard','premium','event_short') NOT NULL,
       amount_rwf BIGINT UNSIGNED NOT NULL,
+      payment_stage ENUM('deposit','balance') NOT NULL DEFAULT 'deposit',
       payment_method ENUM('mtn_momo','bank_transfer') NOT NULL,
       payer_msisdn VARCHAR(20) NULL,
       payer_reference VARCHAR(120) NULL,
@@ -128,6 +129,7 @@ export async function initializeDatabase(): Promise<void> {
   `);
   await ensurePackageOrderColumn('payment_method', "ENUM('mtn_momo','bank_transfer') NOT NULL DEFAULT 'mtn_momo'");
   await ensurePackageOrderColumn('package_code', "ENUM('basic','standard','premium','event_short') NOT NULL");
+  await ensurePackageOrderColumn('payment_stage', "ENUM('deposit','balance') NOT NULL DEFAULT 'deposit'");
   await ensurePackageOrderColumn('payer_reference', 'VARCHAR(120) NULL');
   await ensurePackageOrderColumn('payer_msisdn', 'VARCHAR(20) NULL');
   await ensurePackageOrderColumn('claim_secret_hash', 'CHAR(64) NULL');
@@ -431,7 +433,7 @@ async function ensureInspirationColumn(name: 'image_key' | 'image_mime_type' | '
   if (rows.length === 0) await pool.execute(`ALTER TABLE inspiration_items ADD COLUMN ${name} ${definition}`);
 }
 
-async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_reference' | 'payer_msisdn' | 'claim_secret_hash' | 'package_code', definition: string): Promise<void> {
+async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_reference' | 'payer_msisdn' | 'claim_secret_hash' | 'package_code' | 'payment_stage', definition: string): Promise<void> {
   const [rows] = await pool.query<RowDataPacket[]>(
     'SELECT COLUMN_NAME, COLUMN_TYPE AS columnType, IS_NULLABLE AS isNullable FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
     ['couple_package_orders', name],
@@ -440,6 +442,8 @@ async function ensurePackageOrderColumn(name: 'payment_method' | 'payer_referenc
   else if (name === 'payer_msisdn' && rows[0].isNullable !== 'YES') {
     await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
   } else if (name === 'package_code' && !String(rows[0].columnType).includes("'event_short'")) {
+    await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
+  } else if (name === 'payment_stage' && !String(rows[0].columnType).includes("'balance'")) {
     await pool.execute(`ALTER TABLE couple_package_orders MODIFY COLUMN ${name} ${definition}`);
   }
 }
