@@ -89,7 +89,7 @@ export function CoupleInspirationPage({ publicAccess = false, onViewPackages }: 
   })}</div>;
   const selectedCategoryContent = <><div className="couple-vendor-category-heading"><button onClick={() => setSelectedCategory(null)}>← {t('All categories')}</button><div><h3>{selectedCategory} inspiration</h3><span>{categoryItems.length} {t(categoryItems.length === 1 ? 'example' : 'examples')}</span></div></div>
     {categoryItems.length ? <div className="couple-vendor-gallery">{categoryItems.map((item) => <article className="couple-vendor-card" key={item.id}>
-      <div className="couple-vendor-photo">{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={28} /><span>{t('Inspiration photo coming soon')}</span></div>}</div>
+      <div className={`couple-vendor-photo ${item.imageUrl ? 'has-image' : ''}`}>{item.imageUrl ? <img src={item.imageUrl} alt={item.title} loading="lazy" /> : <div><Image size={28} /><span>{t('Inspiration photo coming soon')}</span></div>}</div>
       <div className="couple-vendor-info"><small>{item.vendorCategory}</small><h3>{item.title}</h3><p>{item.description || t('An example selected by your planning team.')}</p>
         {item.colorPalette && <div className="couple-vendor-palette"><span><Palette size={13} /> {t('Colors')}</span><div>{item.colorPalette.split(',').map((color) => color.trim()).filter(Boolean).map((color) => <i key={color} title={color} style={{ backgroundColor: color }} />)}</div><small>{item.colorPalette}</small></div>}
         {item.priceRwf != null && <div className="couple-vendor-price"><CircleDollarSign size={15} /><b>{Number(item.priceRwf).toLocaleString()} RWF</b></div>}
