@@ -30,9 +30,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 const inspirationImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
 const vendorImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
-const uploadDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'private-files');
-const inspirationImageDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'inspiration-images');
-const vendorImageDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'vendor-images');
+const dataDirectory = path.resolve(process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data'));
+const uploadDirectory = path.join(dataDirectory, 'private-files');
+const inspirationImageDirectory = path.join(dataDirectory, 'inspiration-images');
+const vendorImageDirectory = path.join(dataDirectory, 'vendor-images');
+
+if (production && !process.env.DATA_DIR) {
+  console.warn('DATA_DIR is not set; uploaded files may be lost when the service restarts. Configure a persistent disk.');
+}
 
 class UploadValidationError extends Error {}
 
