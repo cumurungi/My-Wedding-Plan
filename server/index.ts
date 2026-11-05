@@ -28,7 +28,7 @@ const secret = requiredEnv('SESSION_SECRET', 'local-development-secret-change-me
 const sessionStore = new MySQLSessionStore();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 const evidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
-const inspirationImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
+const inspirationImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
 const vendorImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024, files: 1 } });
 const dataDirectory = path.resolve(process.env.DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data'));
 const uploadDirectory = path.join(dataDirectory, 'private-files');
@@ -376,7 +376,23 @@ function sniffUploadMime(buffer: Buffer): string | null {
   if (buffer.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
   if (buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
   if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'))) return 'image/gif';
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  if (buffer.subarray(4, 8).toString('ascii') === 'ftyp' && ['avif', 'avis'].includes(buffer.subarray(8, 12).toString('ascii'))) return 'image/avif';
   return null;
+}
+
+const imageExtensions: Record<string, string> = {
+  'image/avif': '.avif',
+  'image/gif': '.gif',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+function isStoredImage(key: string, mimeType: string): boolean {
+  const extension = imageExtensions[mimeType];
+  return Boolean(extension && key.endsWith(extension) && /^[a-f0-9-]+\.(avif|gif|jpg|png|webp)$/.test(key));
 }
 
 async function savePrivateFile(file: Express.Multer.File, allowedMimeTypes: string[]): Promise<{ key: string; mimeType: string }> {
@@ -406,8 +422,8 @@ function sendPrivateDownload(res: Response, key: string, originalName: string, m
 
 async function saveInspirationImage(file: Express.Multer.File): Promise<{ key: string; mimeType: string }> {
   const mimeType = sniffUploadMime(file.buffer);
-  if (!mimeType || !['image/jpeg', 'image/png'].includes(mimeType)) throw new UploadValidationError('Upload a valid JPG or PNG image.');
-  const extension = mimeType === 'image/png' ? '.png' : '.jpg';
+  const extension = mimeType ? imageExtensions[mimeType] : null;
+  if (!mimeType || !extension) throw new UploadValidationError('Upload a valid JPEG, PNG, GIF, WebP, or AVIF image.');
   const key = `${randomUUID()}${extension}`;
   await fs.mkdir(inspirationImageDirectory, { recursive: true });
   await fs.writeFile(path.join(inspirationImageDirectory, key), file.buffer, { flag: 'wx' });
@@ -425,7 +441,7 @@ async function saveVendorImage(file: Express.Multer.File): Promise<{ key: string
 }
 
 function sendInspirationImage(res: Response, key: string, mimeType: string): void {
-  if (!/^[a-f0-9-]+\.(png|jpg)$/.test(key) || !['image/jpeg', 'image/png'].includes(mimeType)) { res.status(404).end(); return; }
+  if (!isStoredImage(key, mimeType)) { res.status(404).end(); return; }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.type(mimeType);
