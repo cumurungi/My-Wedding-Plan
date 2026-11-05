@@ -1407,11 +1407,16 @@ app.put('/api/admin/inspiration/:id', requireAuth, requireAdmin, inspirationImag
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Check the inspiration details.' }); return; }
   const item = parsed.data;
   let storedImage: { key: string; mimeType: string } | null = null;
+  let stage: 'looking_up_item' | 'writing_image' | 'updating_record' = 'looking_up_item';
   try {
     const [existing] = await pool.query<RowDataPacket[]>('SELECT image_key AS imageKey FROM inspiration_items WHERE id = ?', [id]);
     if (!existing.length) { res.status(404).json({ error: 'Inspiration item not found.' }); return; }
-    if (req.file) storedImage = await saveInspirationImage(req.file);
+    if (req.file) {
+      stage = 'writing_image';
+      storedImage = await saveInspirationImage(req.file);
+    }
     const removeImage = req.body.removeImage === 'true' || req.body.removeImage === 'on';
+    stage = 'updating_record';
     const [result] = await pool.execute<ResultSetHeader>(`UPDATE inspiration_items SET title = ?, item_type = ?, vendor_category = ?, description = ?, price_rwf = ?,
       color_palette = ?, reference_url = NULL, image_url = IF(? = 1, NULL, image_url),
       image_key = IF(? = 1, ?, image_key), image_mime_type = IF(? = 1, ?, image_mime_type),
@@ -1425,7 +1430,15 @@ app.put('/api/admin/inspiration/:id', requireAuth, requireAdmin, inspirationImag
     res.json({ updated: true });
   } catch (error) {
     if (storedImage) await fs.unlink(path.join(inspirationImageDirectory, storedImage.key)).catch(() => undefined);
-    next(error);
+    console.error(`Failed to update inspiration item ${id} during ${stage}.`, error);
+    res.status(500).json({
+      error: stage === 'writing_image'
+        ? 'Image upload failed while writing the image to storage. Check the Render disk mount and available space.'
+        : stage === 'updating_record'
+          ? 'Image upload failed while updating the inspiration record in the database.'
+          : 'Could not load the inspiration record before saving.',
+      stage,
+    });
   }
 });
 
