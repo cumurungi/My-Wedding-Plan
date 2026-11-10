@@ -516,22 +516,15 @@ async function requireClientWorkspacePackage(req: Request, res: Response, next: 
 }
 
 function getManualMomoDetails() {
-  const phone = process.env.MOMO_MANUAL_PHONE?.trim();
-  const accountName = process.env.MOMO_MANUAL_ACCOUNT_NAME?.trim();
-  if (!phone || !accountName) return null;
-  return { phone, accountName };
+  return { phone: '0788774958', accountName: 'Umurungi Charmante' };
 }
 
 function getBankTransferDetails() {
-  const bankName = process.env.BANK_TRANSFER_BANK_NAME?.trim();
-  const accountName = process.env.BANK_TRANSFER_ACCOUNT_NAME?.trim();
-  const accountNumber = process.env.BANK_TRANSFER_ACCOUNT_NUMBER?.trim();
-  if (!bankName || !accountName || !accountNumber) return null;
   return {
-    bankName,
-    accountName,
-    accountNumber,
-    branch: process.env.BANK_TRANSFER_BRANCH?.trim() || null,
+    bankName: 'Equity Bank',
+    accountName: 'Umurungi Charmante',
+    accountNumber: '4007100648133',
+    branch: null,
   };
 }
 
